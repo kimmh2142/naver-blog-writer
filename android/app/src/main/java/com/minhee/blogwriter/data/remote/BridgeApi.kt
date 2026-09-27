@@ -3,6 +3,7 @@ package com.minhee.blogwriter.data.remote
 import com.minhee.blogwriter.data.AppJson
 import com.minhee.blogwriter.data.model.AiProviderId
 import com.minhee.blogwriter.data.model.BridgeStatus
+import com.minhee.blogwriter.data.model.CampaignCheck
 import com.minhee.blogwriter.data.model.PhotoAnalysis
 import com.minhee.blogwriter.data.model.PostBlock
 import com.minhee.blogwriter.data.model.ValidationItem
@@ -75,7 +76,12 @@ data class GenerateRequest(
     val memo: String,
     val style: Map<String, String>,
     val photos: List<GeneratePhoto>,
+    /** 체험단 글일 때만 (체험단 스위치 + 붙여넣은 조건). null이면 JSON에서 빠진다. */
+    val campaign: CampaignInput? = null,
 )
+
+@Serializable
+data class CampaignInput(val text: String)
 
 @Serializable
 data class GeneratePhoto(val photoId: String, val postOrder: Int, val analysis: PhotoAnalysis)
@@ -94,6 +100,8 @@ data class GeneratedDraft(
     val blocks: List<PostBlock>,
     val hashtags: List<String> = emptyList(),
     val confirmNeeded: List<String> = emptyList(),
+    val isCampaign: Boolean = false,
+    val campaignChecks: List<CampaignCheck> = emptyList(),
 )
 
 @Serializable

@@ -2,6 +2,8 @@ package com.minhee.blogwriter.data
 
 import com.minhee.blogwriter.data.BlogGenerationRepository.GenerateOutcome
 import com.minhee.blogwriter.data.model.AiProviderId
+import com.minhee.blogwriter.data.model.CampaignCheck
+import com.minhee.blogwriter.data.remote.CampaignInput
 import com.minhee.blogwriter.data.model.GeneratedBy
 import com.minhee.blogwriter.data.model.GeneratedPost
 import com.minhee.blogwriter.data.model.PhotoAnalysis
@@ -88,6 +90,47 @@ class GeneratePostTest {
         val error = BridgeError(BridgeErrorKind.SERVER, "한도 도달", "USAGE_LIMIT")
         val outcome = repo { BridgeResult.Err(error) }.generatePost(draft, AiProviderId.CLAUDE, StyleProfile())
         assertEquals(GenerateOutcome.Failed(error), outcome)
+    }
+
+    @Test
+    fun campaignTextIsSentOnlyWhenSwitchIsOnAndTextIsNotBlank() = runTest {
+        val sent = mutableListOf<GenerateRequest>()
+        val repository = repo { sent += it; BridgeResult.Ok(response) }
+        repository.generatePost(draft.copy(isCampaign = true, campaignRawText = "  제목에 '군산' 필수  "), AiProviderId.CLAUDE, StyleProfile())
+        repository.generatePost(draft.copy(isCampaign = false, campaignRawText = "제목에 '군산' 필수"), AiProviderId.CLAUDE, StyleProfile())
+        repository.generatePost(draft.copy(isCampaign = true, campaignRawText = "   "), AiProviderId.CLAUDE, StyleProfile())
+        assertEquals(listOf(CampaignInput("제목에 '군산' 필수"), null, null), sent.map { it.campaign })
+    }
+
+    @Test
+    fun campaignChecksAreStoredWithTheResult() = runTest {
+        val checks = listOf(
+            CampaignCheck("제목에 \"군산\" 포함", "APPLIED", "제목 후보 3개 모두 포함", "code"),
+            CampaignCheck("동영상 1개 첨부", "MANUAL", "직접 추가", "ai"),
+        )
+        val campaignResponse = response.copy(post = response.post.copy(isCampaign = true, campaignChecks = checks))
+        val outcome = repo { BridgeResult.Ok(campaignResponse) }
+            .generatePost(draft.copy(isCampaign = true, campaignRawText = "조건"), AiProviderId.CLAUDE, StyleProfile())
+        val post = (outcome as GenerateOutcome.Success).post
+        assertTrue(post.isCampaign)
+        assertEquals(checks, post.campaignChecks)
+
+        // 저장했다가 다시 읽어도 유지되고, 체험단 필드가 없는 예전 결과도 읽힌다
+        val saved = AppJson.decodeFromString<PostDraft>(AppJson.encodeToString(PostDraft.serializer(), draft.copy(result = post)))
+        assertEquals(checks, saved.result!!.campaignChecks)
+        val old = AppJson.decodeFromString<GeneratedPost>(
+            """{"titleCandidates":["a","b","c"],"blocks":[],"generatedBy":{"provider":"claude","generatedAt":1}}""",
+        )
+        assertEquals(false, old.isCampaign)
+        assertEquals(emptyList<CampaignCheck>(), old.campaignChecks)
+    }
+
+    @Test
+    fun campaignFieldIsOmittedFromJsonWhenNotCampaign() {
+        val request = GenerateRequest("claude", "TRAVEL", "", "", emptyMap(), emptyList())
+        val json = AppJson.encodeToString(GenerateRequest.serializer(), request)
+        assertTrue(!json.contains("campaign"))
+        assertTrue(AppJson.encodeToString(GenerateRequest.serializer(), request.copy(campaign = CampaignInput("조건"))).contains(""""campaign":{"text":"조건"}"""))
     }
 
     @Test

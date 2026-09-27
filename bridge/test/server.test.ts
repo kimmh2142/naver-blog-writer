@@ -203,6 +203,33 @@ test("원고 생성: 사진 없이 분석만 보내고, 번호를 photoId로 되
   assert.match(claude.requests[0].instructions, /사진 1: 종류 exterior/);
 });
 
+test("원고 생성: 체험단 안내문이 있어도 모델 호출은 1회, 체크리스트를 함께 돌려준다", async () => {
+  const { app, claude } = setup({ t: 0 }, async () => ({
+    output: {
+      ...goodDraft,
+      campaignRules: { titleKeywords: ["t"], bodyKeywords: [], requiredHashtags: ["군산"], minPhotos: 0 },
+      campaignChecks: [{ requirement: "지도 첨부", status: "APPLIED", note: "" }],
+    },
+    model: "m",
+    usage: null,
+  }));
+  const res = await app.request("/v1/posts/generate", {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify({ ...genBody, campaign: { text: "제목에 t 포함, 해시태그 #군산, 지도 첨부" } }),
+  });
+  const body: any = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(claude.requests.length, 1);
+  assert.match(claude.requests[0].instructions, /\[체험단 요구사항\]/);
+  assert.equal(body.post.isCampaign, true);
+  assert.deepEqual(body.post.campaignChecks.map((c: any) => c.status), ["APPLIED", "APPLIED", "MANUAL"]);
+
+  const plain: any = await (await postGenerate(app)).json();
+  assert.equal(plain.post.isCampaign, false);
+  assert.deepEqual(plain.post.campaignChecks, []);
+});
+
 test("원고 생성: 구조 문제가 있으면 1회만 수정 요청", async () => {
   const outputs = [{ ...goodDraft, blocks: [{ type: "imageGroup", text: "", photoRefs: ["2", "1"] }, goodDraft.blocks[1]] }, goodDraft];
   const { app, claude } = setup({ t: 0 }, async () => ({ output: outputs.shift(), model: "m", usage: null }));

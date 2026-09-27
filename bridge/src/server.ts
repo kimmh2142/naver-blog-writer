@@ -22,7 +22,7 @@ import {
 } from "./providers/types.js";
 import { Semaphore } from "./semaphore.js";
 
-export const BRIDGE_VERSION = "0.3.0";
+export const BRIDGE_VERSION = "0.4.0";
 const STATUS_CACHE_MS = 30_000;
 /** 요청 1건의 사진 수 상한 (Android 배치 크기 상한과 같음) */
 export const MAX_IMAGES_PER_REQUEST = 10;
@@ -140,6 +140,8 @@ export function parseGenerateBody(body: any): { providerId: ProviderId; input: W
       memo: str(body.memo, 5000),
       style: Object.fromEntries(Object.entries(style).map(([k, v]) => [k, str(v, 1000)])),
       photos: parsed,
+      // 체험단 안내문 원문 (앱의 체험단 스위치 + 붙여넣은 조건). 없으면 일반 글.
+      campaignText: str(body.campaign?.text, 6000).trim() || null,
     },
   };
 }
@@ -301,7 +303,7 @@ export function createApp({ appToken, providers, now = Date.now, log = console.l
           );
         }
       }
-      const { draft, validation } = finalizeDraft(result.output, input.photos, repaired);
+      const { draft, validation } = finalizeDraft(result.output, input.photos, repaired, input.campaignText);
       return c.json({
         provider: providerId,
         model: result.model,

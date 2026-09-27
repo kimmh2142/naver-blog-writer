@@ -133,7 +133,8 @@ class BridgeApiTest {
             MockResponse().setBody(
                 """{"provider":"codex","model":"gpt-6-astra",
                    "post":{"titleCandidates":["a","b","c"],"blocks":[{"type":"imageGroup","text":"","photoIds":["p1"]},{"type":"paragraph","text":"본문","photoIds":[]}],
-                           "hashtags":["#군산"],"confirmNeeded":["가게 이름"]},
+                           "hashtags":["#군산"],"confirmNeeded":["가게 이름"],"isCampaign":true,
+                           "campaignChecks":[{"requirement":"사진 15장 이상","status":"UNMET","note":"앱에서 고른 사진 1장 (필요 15장)","checkedBy":"code"}]},
                    "validation":{"repaired":false,"items":[{"label":"사진","status":"PASS","detail":"1/1장"}]}}""",
             ),
         )
@@ -154,6 +155,9 @@ class BridgeApiTest {
         assertEquals("gpt-6-astra", response.model)
         assertEquals(listOf("p1"), response.post.blocks.first().photoIds)
         assertEquals("PASS", response.validation.items.single().status)
+        assertTrue(response.post.isCampaign)
+        assertEquals("UNMET", response.post.campaignChecks.single().status)
+        assertEquals("code", response.post.campaignChecks.single().checkedBy)
     }
 
     @Test

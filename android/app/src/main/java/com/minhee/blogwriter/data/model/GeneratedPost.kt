@@ -27,6 +27,19 @@ data class GeneratedBy(
     val providerLabel: String get() = AiProviderId.entries.find { it.id == provider }?.label ?: provider
 }
 
+/**
+ * 체험단 조건 하나의 확인 결과.
+ * status: APPLIED(원고에 반영) / MANUAL(게시할 때 직접) / NEEDS_CONFIRMATION(사실 근거 부족) / UNMET(코드로 확인했더니 미충족)
+ * checkedBy: code(실제 원고를 세어서 판정) / ai(작성 모델의 판단)
+ */
+@Serializable
+data class CampaignCheck(
+    val requirement: String,
+    val status: String,
+    val note: String = "",
+    val checkedBy: String = "ai",
+)
+
 /** 작성 건에 저장되는 마지막 원고 결과 (1개). */
 @Serializable
 data class GeneratedPost(
@@ -36,6 +49,9 @@ data class GeneratedPost(
     val confirmNeeded: List<String> = emptyList(),
     val generatedBy: GeneratedBy,
     val validation: List<ValidationItem> = emptyList(),
+    /** 체험단 조건을 넣어 만든 원고인지. true일 때만 결과 화면에 체험단 체크리스트를 보인다. */
+    val isCampaign: Boolean = false,
+    val campaignChecks: List<CampaignCheck> = emptyList(),
 ) {
     /** 이 원고에 쓰인 사진 ID (포스팅 순서) */
     val photoIds: List<String> get() = blocks.flatMap { it.photoIds }

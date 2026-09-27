@@ -22,6 +22,7 @@ const input: WritingInput = {
   memo: "엄마랑 초원사진관 가서 사진 찍음",
   style: { endings: "~했어요", avoidPhrases: "존맛탱", customInstructions: "" },
   photos: [photo("a", 0), photo("b", 1, ["우산인지 양산인지 불확실"]), photo("c", 2), photo("d", 3)],
+  campaignText: null,
 };
 
 const draft = (groups: string[][], extra: Partial<Record<string, unknown>> = {}) => ({

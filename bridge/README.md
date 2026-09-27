@@ -63,6 +63,18 @@ npm.cmd start                # Ctrl+C로 종료
 - 본문의 `[확인 필요: X]`는 코드가 `confirmNeeded`에 자동으로 추가한다. 사진 분석에 불확실 항목이 있는데 목록이 비면 경고만 한다.
 - 사실 점검용 추가 AI 호출은 하지 않는다.
 
+### 체험단 조건 (요청의 `campaign.text`, 없으면 일반 글)
+- 별도 분석 호출 없이 **같은 원고 작성 호출**에 `[체험단 요구사항]`으로 넣는다.
+  우선순위는 사실 규칙 > 체험단 요구사항 > 사용자 문체 설정 > 기본 문체이다.
+- 작성 모델이 함께 돌려주는 것
+  - `campaignRules`: 코드로 셀 수 있는 조건(제목/본문 키워드와 횟수, 필수 해시태그, 최소 사진 수)
+  - `campaignChecks`: 나머지 조건마다 APPLIED / MANUAL / NEEDS_CONFIRMATION
+- 코드가 하는 것
+  - 안내문에 실제로 적힌 문자열이 아닌 규칙은 버린다(모델이 조건을 지어내지 않게).
+  - 키워드, 해시태그, 사진 수는 실제 원고를 세어서 APPLIED 또는 UNMET으로 판정한다.
+  - 동영상, GIF, 지도, 링크, 영수증, 첨부처럼 텍스트로 끝낼 수 없는 조건을 모델이 APPLIED라고 하면 MANUAL로 바꾼다.
+- 응답의 `post.isCampaign`, `post.campaignChecks[{requirement, status, note, checkedBy}]`로 전달된다.
+
 ### 사진을 남기지 않는 방식
 - Claude: 사진을 메모리에서 base64로만 넘기고, `persistSession: false`로 대화 기록을 저장하지 않습니다.
 - GPT: Codex SDK로 부르면 세션 기록에 사진이 base64로 남아서(PoC에서 확인) `codex exec --ephemeral`을 직접 실행합니다.

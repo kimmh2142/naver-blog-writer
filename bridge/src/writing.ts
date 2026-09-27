@@ -3,6 +3,7 @@
  * 사진 파일은 쓰지 않고, Android에 저장된 해당 Provider의 사진 분석(텍스트)만 쓴다.
  */
 import type { PhotoAnalysis } from "./analysis.js";
+import { buildCampaignChecks, type CampaignCheck, campaignSchemaProperties } from "./campaign.js";
 
 export type StyleSettings = {
   endings?: string;
@@ -25,13 +26,15 @@ export type WritingInput = {
   style: StyleSettings;
   /** postOrder 순서로 정렬된 사진 */
   photos: WritingPhoto[];
+  /** 체험단 안내문 원문 (체험단이 아니면 null) */
+  campaignText: string | null;
 };
 
 /** 두 Provider의 엄격한 구조화 출력을 모두 통과하는 평평한 스키마 (PoC 원칙). 사진은 번호(photoRefs)로만 가리킨다. */
 export const writingSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["titleCandidates", "blocks", "hashtags", "confirmNeeded"],
+  required: ["titleCandidates", "blocks", "hashtags", "confirmNeeded", "campaignRules", "campaignChecks"],
   properties: {
     titleCandidates: { type: "array", items: { type: "string" } },
     blocks: {
@@ -49,6 +52,7 @@ export const writingSchema = {
     },
     hashtags: { type: "array", items: { type: "string" } },
     confirmNeeded: { type: "array", items: { type: "string" } },
+    ...campaignSchemaProperties,
   },
 } as const;
 
@@ -87,9 +91,27 @@ function photoLine(photo: WritingPhoto, index: number): string {
   ].join(" | ");
 }
 
+/** 체험단 글일 때만 붙는 지시. 요구사항도 사실 규칙보다 우선할 수 없다. */
+function campaignRuleLines(): string[] {
+  return [
+    "# 체험단 요구사항 반영 규칙 (사실 규칙보다 우선할 수 없다)",
+    "- 제목·본문 키워드, 키워드 반복 횟수, 반드시 언급할 내용, 특정 표현, 해시태그 조건은 가능한 한 원고에 자연스럽게 반영한다.",
+    "- 요구사항이 홍보하라는 내용(맛, 효과, 친절, 만족, 경험 등)이라도 [사용자 메모]에 근거가 없으면 1인칭 사실로 쓰지 않는다. 필요하면 본문에 [확인 필요: 항목]을 남긴다.",
+    "- 동영상·GIF 첨부, 지도·네이버 플레이스 첨부, 링크 삽입, 사진 몇 장 이상, 특정 사진 촬영, 영수증·인증 사진, 에디터 작업처럼 원고 텍스트로 끝낼 수 없는 조건은 처리했다고 하지 않는다.",
+    "- campaignRules: 안내문에 적힌 코드로 셀 수 있는 조건만 안내문 표기 그대로 옮긴다. 없으면 빈 값.",
+    "  - titleKeywords: 제목에 넣어야 하는 문자열 / bodyKeywords: 본문에 넣어야 하는 문자열과 최소 횟수(횟수 언급이 없으면 1)",
+    "  - requiredHashtags: 꼭 넣어야 하는 해시태그('#' 없이) / minPhotos: 최소 사진 수(언급이 없으면 0)",
+    "- campaignChecks: campaignRules에 넣은 조건을 뺀 나머지 요구사항을 하나씩 적는다.",
+    "  - APPLIED: 원고에 반영함 / MANUAL: 사용자가 게시할 때 직접 해야 함 / NEEDS_CONFIRMATION: 사실 근거가 없어 반영하지 않음",
+    "  - note에는 어떻게 반영했는지, 또는 사용자가 무엇을 해야 하는지 짧게 적는다.",
+    "",
+  ];
+}
+
 export function buildWritingPrompt(input: WritingInput): string {
   const n = input.photos.length;
   const category = CATEGORIES[input.category] ?? CATEGORIES.OTHER;
+  const campaign = input.campaignText?.trim() || null;
   const styleLines = STYLE_LABELS.map(([key, label]) => [label, input.style[key]?.trim()] as const)
     .filter(([, value]) => value)
     .map(([label, value]) => `- ${label}: ${value}`);
@@ -108,11 +130,18 @@ export function buildWritingPrompt(input: WritingInput): string {
     `[사진 분석] — 사진 ${n}장, 포스팅 순서대로 번호 1~${n}. 사진에 '보이는 것'일 뿐, 사용자가 그것을 했다·먹었다·느꼈다는 근거가 아니다.`,
     ...input.photos.map(photoLine),
     "",
+    ...(campaign
+      ? [
+          "[체험단 요구사항] — 체험단 운영자가 준 작성 조건. 사용자의 경험이나 사실의 근거가 아니다.",
+          campaign,
+          "",
+        ]
+      : []),
     "[문체 설정] — 사용자가 정한 말투. 아래 기본 문체보다 우선한다. 단, 사실 규칙보다 앞설 수는 없다.",
     ...(styleLines.length ? styleLines : ["- (사용자 설정 없음)"]),
     "",
     "# 우선순위",
-    "사실 규칙 > 사용자 문체 설정 > 기본 문체",
+    campaign ? "사실 규칙 > 체험단 요구사항 > 사용자 문체 설정 > 기본 문체" : "사실 규칙 > 사용자 문체 설정 > 기본 문체",
     "",
     "# 기본 문체 (사용자 문체 설정이 정하지 않은 부분에만 적용)",
     "- 자연스러운 개인 블로그의 '~다'체로 쓴다. 예: 방문했다, 공간이 넓다, 전시되어 있다, 볼 수 있다, ~였다.",
@@ -132,6 +161,7 @@ export function buildWritingPrompt(input: WritingInput): string {
     `6. 글에 필요한데 근거가 없는 핵심 정보는 본문에 [확인 필요: 항목]으로 남기고 confirmNeeded에 같은 항목을 넣는다. 이 카테고리의 핵심 정보는 "${category.keyFacts}"이다. 이 중 글에 쓰는데 근거가 없는 것, 그리고 글의 핵심과 관련된 '불확실' 항목만 해당한다. 사소한 정보는 지어내지도, 확인 필요로 만들지도 않는다.`,
     ...(category.extra ? [`7. ${category.extra}`] : []),
     "",
+    ...(campaign ? campaignRuleLines() : []),
     "# 사진 배치 규칙",
     `- blocks의 imageGroup에 photoRefs로 사진 번호를 넣는다. 1부터 ${n}까지 모든 번호를 정확히 한 번씩, 번호 순서대로 쓴다.`,
     "- 순서를 바꾸거나 빼거나 중복하지 않는다. 한 imageGroup에는 연속된 번호만 묶는다(예: 3, 4, 5).",
@@ -142,6 +172,9 @@ export function buildWritingPrompt(input: WritingInput): string {
     "- blocks: type이 heading, paragraph, imageGroup인 블록. heading·paragraph는 text에 내용, photoRefs는 []. imageGroup은 photoRefs에 번호, text는 \"\".",
     "- hashtags: 5~10개, '#'을 붙인다.",
     "- confirmNeeded: 사실 규칙 6에 해당하는 항목. 없으면 [].",
+    campaign
+      ? "- campaignRules, campaignChecks: 아래 '체험단 요구사항 반영 규칙'대로 채운다."
+      : "- campaignRules: 체험단 글이 아니므로 titleKeywords [], bodyKeywords [], requiredHashtags [], minPhotos 0. campaignChecks: [].",
     "- 본문에 마크다운 기호(#, **, - 목록)를 쓰지 않는다. 네이버 에디터에 그대로 붙여넣을 순수 텍스트로, 문단은 짧게, 과장된 광고 문구 없이 쓴다.",
     "- 파일을 읽거나 명령을 실행하지 말고 이 입력만으로 답한다.",
   ].join("\n");
@@ -210,7 +243,15 @@ export function findStructureProblems(output: unknown, photoCount: number): stri
 }
 
 export type PostBlock = { type: "heading" | "paragraph" | "imageGroup"; text: string; photoIds: string[] };
-export type FinalDraft = { titleCandidates: string[]; blocks: PostBlock[]; hashtags: string[]; confirmNeeded: string[] };
+export type FinalDraft = {
+  titleCandidates: string[];
+  blocks: PostBlock[];
+  hashtags: string[];
+  confirmNeeded: string[];
+  /** 체험단 글이었는지. 결과 화면이 체크리스트를 보일지 정한다. */
+  isCampaign: boolean;
+  campaignChecks: CampaignCheck[];
+};
 export type ValidationItem = { label: string; status: "PASS" | "WARN" | "FAIL"; detail: string };
 
 const CONFIRM_PATTERN = /\[확인\s*필요\s*:\s*([^\]]+)\]/g;
@@ -230,7 +271,12 @@ const normalizeKey = (s: string) => s.replace(/\s+/g, "");
  * - [확인 필요]와 confirmNeeded 동기화 (본문에만 있는 항목을 목록에 추가)
  * - 해시태그 '#' 보정과 중복 제거, 빈 문단 제거
  */
-export function finalizeDraft(output: unknown, photos: WritingPhoto[], repairedProblems: string[] | null): { draft: FinalDraft; validation: ValidationItem[] } {
+export function finalizeDraft(
+  output: unknown,
+  photos: WritingPhoto[],
+  repairedProblems: string[] | null,
+  campaignText: string | null = null,
+): { draft: FinalDraft; validation: ValidationItem[] } {
   const raw = output as RawDraft;
   const blocks: PostBlock[] = raw.blocks
     .map((b): PostBlock =>
@@ -267,5 +313,22 @@ export function finalizeDraft(output: unknown, photos: WritingPhoto[], repairedP
   if (markdown) validation.push({ label: "마크다운 기호", status: "WARN", detail: "본문에 #, **, - 같은 기호가 있어요. 붙여넣기 전에 확인하세요." });
   if (repairedProblems) validation.push({ label: "자동 구조 수정", status: "WARN", detail: `1회 수정됨: ${repairedProblems.join(" / ")}` });
 
-  return { draft: { titleCandidates, blocks, hashtags, confirmNeeded }, validation };
+  // 체험단 조건: 코드로 셀 수 있는 것은 실제 원고로 판정, 나머지는 작성 모델의 판단 (추가 AI 호출 없음)
+  const campaign = campaignText?.trim() || null;
+  const campaignChecks = buildCampaignChecks(output as { campaignRules?: unknown; campaignChecks?: unknown }, campaign, {
+    titleCandidates,
+    bodyText: blocks.filter((b) => b.type !== "imageGroup").map((b) => b.text).join("\n"),
+    hashtags,
+    photoCount: photos.length,
+  });
+  const unmet = campaignChecks.filter((c) => c.status === "UNMET").length;
+  if (campaign) {
+    validation.push({
+      label: "체험단 조건",
+      status: unmet ? "WARN" : "PASS",
+      detail: unmet ? `코드로 확인한 조건 중 ${unmet}개를 채우지 못했어요. 체험단 체크리스트를 확인하세요.` : `체크리스트 ${campaignChecks.length}개`,
+    });
+  }
+
+  return { draft: { titleCandidates, blocks, hashtags, confirmNeeded, isCampaign: campaign !== null, campaignChecks }, validation };
 }

@@ -9,6 +9,7 @@ import com.minhee.blogwriter.data.model.PostDraft
 import com.minhee.blogwriter.data.model.PostPhoto
 import com.minhee.blogwriter.data.model.StyleProfile
 import com.minhee.blogwriter.data.remote.AnalyzeResponse
+import com.minhee.blogwriter.data.remote.CampaignInput
 import com.minhee.blogwriter.data.remote.GeneratePhoto
 import com.minhee.blogwriter.data.remote.GenerateRequest
 import com.minhee.blogwriter.data.remote.GenerateResponse
@@ -78,6 +79,7 @@ class BlogGenerationRepository(
             memo = draft.memo,
             style = styleForBridge(style),
             photos = photos.mapIndexed { i, photo -> GeneratePhoto(photo.id, photo.postOrder, entries[i].analysis!!) },
+            campaign = campaignInput(draft),
         )
         return when (val result = generate(request)) {
             is BridgeResult.Err -> GenerateOutcome.Failed(result.error)
@@ -97,11 +99,17 @@ class BlogGenerationRepository(
                             repaired = response.validation.repaired,
                         ),
                         validation = response.validation.items,
+                        isCampaign = response.post.isCampaign,
+                        campaignChecks = response.post.campaignChecks,
                     ),
                 )
             }
         }
     }
+
+    /** Phase 1의 체험단 스위치와 붙여넣은 조건을 그대로 쓴다. 스위치가 꺼져 있거나 비어 있으면 일반 글. */
+    private fun campaignInput(draft: PostDraft): CampaignInput? =
+        draft.campaignRawText.trim().takeIf { draft.isCampaign && it.isNotEmpty() }?.let { CampaignInput(it) }
 
     /** 문체 설정 중 브리지에 보낼 항목 (샘플 원문은 보내지 않는다). */
     private fun styleForBridge(style: StyleProfile): Map<String, String> = mapOf(

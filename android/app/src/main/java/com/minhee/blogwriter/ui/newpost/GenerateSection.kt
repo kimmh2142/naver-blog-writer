@@ -44,6 +44,16 @@ fun GenerateSection(
             )
             else -> Text("사진 파일은 다시 보내지 않고, ${provider.label} 사진 분석과 메모·문체 설정만으로 원고를 써요.", style = MaterialTheme.typography.bodySmall)
         }
+        if (draft.isCampaign) {
+            Text(
+                if (draft.campaignRawText.isBlank()) {
+                    "체험단 스위치가 켜져 있지만 조건이 비어 있어요. 이대로 만들면 일반 글로 생성돼요."
+                } else {
+                    "붙여넣은 체험단 조건을 원고에 반영하고, 결과 화면에 체크리스트로 보여줘요. (추가 AI 호출 없음)"
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         generation.error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.minhee.blogwriter.data.model.AiProviderId
+import com.minhee.blogwriter.data.model.CampaignCheck
 import com.minhee.blogwriter.data.model.GeneratedPost
 import com.minhee.blogwriter.data.model.PostDraft
 import com.minhee.blogwriter.data.model.PostPhoto
@@ -154,6 +155,7 @@ fun ResultScreen(
                 }
             }
             item { HorizontalDivider() }
+            if (post.isCampaign) item { CampaignChecklist(post.campaignChecks) }
             item { ValidationList(post) }
             item { RegenerateSection(draft, onEdit = { onEdit(draft.id) }, onRegenerate = { onRegenerate(draft.id, it) }) }
         }
@@ -222,6 +224,46 @@ private fun ValidationList(post: GeneratedPost) {
             )
         }
     }
+}
+
+/** 체험단 조건 체크리스트. 게시 전에 빠르게 훑어보는 용도다. */
+@Composable
+private fun CampaignChecklist(checks: List<CampaignCheck>) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val manual = checks.count { it.status == "MANUAL" }
+            val attention = checks.count { it.status == "UNMET" || it.status == "NEEDS_CONFIRMATION" }
+            Text("체험단 체크리스트", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text("직접 추가할 항목 ${manual}개 · 확인·수정할 항목 ${attention}개", style = MaterialTheme.typography.bodySmall)
+            checks.forEach { check ->
+                val (mark, label) = campaignMark(check.status)
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(mark, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(24.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${check.requirement} — $label",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (check.status == "UNMET" || check.status == "NEEDS_CONFIRMATION") MaterialTheme.colorScheme.error else Color.Unspecified,
+                        )
+                        if (check.note.isNotBlank()) {
+                            Text(
+                                check.note + if (check.checkedBy == "code") " (앱이 원고에서 직접 확인)" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** ✓ 원고에서 처리, □ 직접 추가, ! 확인 필요, ✗ 조건 미충족 */
+private fun campaignMark(status: String): Pair<String, String> = when (status) {
+    "APPLIED" -> "✓" to "원고에 반영"
+    "MANUAL" -> "□" to "게시할 때 직접"
+    "UNMET" -> "✗" to "조건 미충족"
+    else -> "!" to "확인 필요"
 }
 
 /** 다른 AI(또는 같은 AI)로 다시 생성. 그 AI의 사진 분석이 모두 있어야 바로 생성할 수 있다. */
