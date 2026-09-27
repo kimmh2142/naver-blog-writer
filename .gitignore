@@ -1,12 +1,32 @@
-# Android
-android/.gradle/
-android/.kotlin/
-android/build/
-android/app/build/
-android/local.properties
+# Android / Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+
+# IDE
 .idea/
-android/captures/
+.vscode/
 *.iml
+
+# Signing keys
+*.jks
+*.keystore
+
+# Secrets (값이 없는 .env.example만 커밋한다)
+.env
+.env.*
+!.env.example
+*service-account*.json
+*credentials*.json
+
+# Node (Phase 2 backend)
+node_modules/
+dist/
+coverage/
 
 # OS
 .DS_Store
