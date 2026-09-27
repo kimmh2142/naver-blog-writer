@@ -1,11 +1,17 @@
 package com.minhee.blogwriter.data
 
 import com.minhee.blogwriter.data.model.AiProviderId
+import com.minhee.blogwriter.data.model.GeneratedBy
+import com.minhee.blogwriter.data.model.GeneratedPost
 import com.minhee.blogwriter.data.model.PhotoAnalysis
 import com.minhee.blogwriter.data.model.PhotoAnalysisEntry
 import com.minhee.blogwriter.data.model.PostDraft
 import com.minhee.blogwriter.data.model.PostPhoto
+import com.minhee.blogwriter.data.model.StyleProfile
 import com.minhee.blogwriter.data.remote.AnalyzeResponse
+import com.minhee.blogwriter.data.remote.GeneratePhoto
+import com.minhee.blogwriter.data.remote.GenerateRequest
+import com.minhee.blogwriter.data.remote.GenerateResponse
 import com.minhee.blogwriter.data.remote.BridgeError
 import com.minhee.blogwriter.data.remote.BridgeErrorKind
 import com.minhee.blogwriter.data.remote.BridgeResult
@@ -36,15 +42,80 @@ data class AnalysisSummary(
 )
 
 /**
- * AI 생성 작업의 순서를 조율한다. 2단계는 사진 분석만 있다.
+ * AI 생성 작업의 순서를 조율한다: 사진 분석(배치) → 원고 생성.
  * 작성 건 파일은 직접 쓰지 않고, 배치 결과를 onBatch로 넘겨 화면(ViewModel)이 합쳐 저장하게 한다.
  */
 class BlogGenerationRepository(
     private val config: GenerationConfig,
     private val prepareImage: suspend (PostPhoto) -> File,
     private val analyze: suspend (AiProviderId, String, String, List<Pair<String, File>>) -> BridgeResult<AnalyzeResponse>,
+    private val generate: suspend (GenerateRequest) -> BridgeResult<GenerateResponse>,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    sealed interface GenerateOutcome {
+        data class Success(val post: GeneratedPost) : GenerateOutcome
+
+        /** 이 Provider의 사진 분석이 없는 사진이 있어 브리지에 보내지 않았다. */
+        data class NeedsAnalysis(val provider: AiProviderId, val missing: Int) : GenerateOutcome
+        data class Failed(val error: BridgeError) : GenerateOutcome
+    }
+
+    /**
+     * 선택한 Provider로 원고를 만든다. 사진 파일은 보내지 않고 이 Provider의 사진 분석만 포스팅 순서로 보낸다.
+     * 분석이 하나라도 없으면(다른 Provider 분석은 쓰지 않음) 호출하지 않고 NeedsAnalysis를 돌려준다.
+     */
+    suspend fun generatePost(draft: PostDraft, provider: AiProviderId, style: StyleProfile): GenerateOutcome {
+        val photos = draft.photosInPostOrder()
+        if (photos.isEmpty()) return GenerateOutcome.NeedsAnalysis(provider, 0)
+        val missing = photos.count { it.needsAnalysis(provider) }
+        if (missing > 0) return GenerateOutcome.NeedsAnalysis(provider, missing)
+
+        val entries = photos.map { it.analysisFor(provider)!! }
+        val request = GenerateRequest(
+            provider = provider.id,
+            category = draft.category.name,
+            subjectName = draft.subjectName,
+            memo = draft.memo,
+            style = styleForBridge(style),
+            photos = photos.mapIndexed { i, photo -> GeneratePhoto(photo.id, photo.postOrder, entries[i].analysis!!) },
+        )
+        return when (val result = generate(request)) {
+            is BridgeResult.Err -> GenerateOutcome.Failed(result.error)
+            is BridgeResult.Ok -> {
+                val response = result.value
+                GenerateOutcome.Success(
+                    GeneratedPost(
+                        titleCandidates = response.post.titleCandidates,
+                        blocks = response.post.blocks,
+                        hashtags = response.post.hashtags,
+                        confirmNeeded = response.post.confirmNeeded,
+                        generatedBy = GeneratedBy(
+                            provider = response.provider,
+                            model = response.model,
+                            generatedAt = clock(),
+                            analysisModels = entries.mapNotNull { it.model }.distinct(),
+                            repaired = response.validation.repaired,
+                        ),
+                        validation = response.validation.items,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** 문체 설정 중 브리지에 보낼 항목 (샘플 원문은 보내지 않는다). */
+    private fun styleForBridge(style: StyleProfile): Map<String, String> = mapOf(
+        "endings" to style.endings,
+        "sentenceLength" to style.sentenceLength,
+        "paragraphLength" to style.paragraphLength,
+        "emojiFrequency" to style.emojiFrequency,
+        "laughStyle" to style.laughStyle,
+        "favoritePhrases" to style.favoritePhrases,
+        "avoidPhrases" to style.avoidPhrases,
+        "reviewStructure" to style.reviewStructure,
+        "customInstructions" to style.customInstructions,
+    ).filterValues { it.isNotBlank() }
+
     /** 이 Provider로 분석이 필요한 사진 (포스팅 순서). */
     fun photosToAnalyze(draft: PostDraft, provider: AiProviderId): List<PostPhoto> =
         draft.photosInPostOrder().filter { it.needsAnalysis(provider) }

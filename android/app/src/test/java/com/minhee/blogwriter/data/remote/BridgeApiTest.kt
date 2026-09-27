@@ -128,6 +128,35 @@ class BridgeApiTest {
     }
 
     @Test
+    fun generatePostsJsonAndParsesResult() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"provider":"codex","model":"gpt-6-astra",
+                   "post":{"titleCandidates":["a","b","c"],"blocks":[{"type":"imageGroup","text":"","photoIds":["p1"]},{"type":"paragraph","text":"본문","photoIds":[]}],
+                           "hashtags":["#군산"],"confirmNeeded":["가게 이름"]},
+                   "validation":{"repaired":false,"items":[{"label":"사진","status":"PASS","detail":"1/1장"}]}}""",
+            ),
+        )
+        val request = GenerateRequest(
+            provider = "codex", category = "TRAVEL", subjectName = "군산", memo = "메모", style = mapOf("endings" to "~했어요"),
+            photos = listOf(GeneratePhoto("p1", 0, com.minhee.blogwriter.data.model.PhotoAnalysis(type = "food", description = "짬뽕"))),
+        )
+        val result = api().generatePost(request)
+
+        val sent = server.takeRequest()
+        assertEquals("/v1/posts/generate", sent.path)
+        assertTrue(sent.getHeader("Content-Type")!!.startsWith("application/json"))
+        val body = sent.body.readUtf8()
+        assertTrue(body.contains(""""provider":"codex""""))
+        assertTrue(body.contains(""""description":"짬뽕""""))
+
+        val response = (result as BridgeResult.Ok).value
+        assertEquals("gpt-6-astra", response.model)
+        assertEquals(listOf("p1"), response.post.blocks.first().photoIds)
+        assertEquals("PASS", response.validation.items.single().status)
+    }
+
+    @Test
     fun missingUrlOrTokenIsNotConfigured() = runTest {
         assertFalse(BridgeApi("", "token").isConfigured)
         assertFalse(BridgeApi(server.url("/").toString(), "").isConfigured)

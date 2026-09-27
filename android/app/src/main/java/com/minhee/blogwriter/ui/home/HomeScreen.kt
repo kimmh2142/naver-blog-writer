@@ -44,7 +44,8 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onNewPost: () -> Unit,
-    onOpenDraft: (String) -> Unit,
+    /** (작성 건 id, 원고가 있는지). 원고가 있으면 결과 화면으로 연다. */
+    onOpenDraft: (String, Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
 ) {
@@ -92,12 +93,15 @@ fun HomeScreen(
                     ListItem(
                         headlineContent = { Text(draft.title) },
                         supportingContent = {
-                            Text("${draft.category.label} · 사진 ${draft.photoCount}장 · ${formatDate(draft.updatedAt)}")
+                            Text(
+                                "${draft.category.label} · 사진 ${draft.photoCount}장 · ${formatDate(draft.updatedAt)}" +
+                                    (draft.resultBy?.let { " · 원고 있음($it)" } ?: ""),
+                            )
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .combinedClickable(
-                                onClick = { onOpenDraft(draft.id) },
+                                onClick = { onOpenDraft(draft.id, draft.resultBy != null) },
                                 onLongClick = { pendingDelete = draft },
                             ),
                     )

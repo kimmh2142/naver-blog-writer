@@ -2,7 +2,16 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { ANALYSIS_VERSION, analysisSchema, buildAnalysisPrompt, normalizeAnalysis } from "./analysis.js";
+import { ANALYSIS_VERSION, PHOTO_TYPES, analysisSchema, buildAnalysisPrompt, normalizeAnalysis } from "./analysis.js";
+import {
+  buildRepairPrompt,
+  buildWritingPrompt,
+  finalizeDraft,
+  findStructureProblems,
+  type WritingInput,
+  type WritingPhoto,
+  writingSchema,
+} from "./writing.js";
 import {
   type AiProvider,
   type CallErrorCode,
@@ -13,12 +22,14 @@ import {
 } from "./providers/types.js";
 import { Semaphore } from "./semaphore.js";
 
-export const BRIDGE_VERSION = "0.2.0";
+export const BRIDGE_VERSION = "0.3.0";
 const STATUS_CACHE_MS = 30_000;
 /** 요청 1건의 사진 수 상한 (Android 배치 크기 상한과 같음) */
 export const MAX_IMAGES_PER_REQUEST = 10;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const ANALYSIS_TIMEOUT_MS = 150_000;
+const WRITING_TIMEOUT_MS = 240_000;
+const REPAIR_TIMEOUT_MS = 150_000;
 /** 동시에 실행하는 모델 호출 수 */
 const MODEL_CONCURRENCY = 2;
 
@@ -30,7 +41,7 @@ export function tokenMatches(expected: string, header: string | undefined): bool
 }
 
 /** 오류 코드별 HTTP 상태. Android는 본문의 error.code로 구분한다. */
-export function httpStatusFor(code: CallErrorCode | "BAD_REQUEST" | "ANALYSIS_VERSION_MISMATCH"): ContentfulStatusCode {
+export function httpStatusFor(code: CallErrorCode | "BAD_REQUEST" | "ANALYSIS_VERSION_MISMATCH" | "BUSY"): ContentfulStatusCode {
   switch (code) {
     case "BAD_REQUEST":
       return 400;
@@ -39,6 +50,7 @@ export function httpStatusFor(code: CallErrorCode | "BAD_REQUEST" | "ANALYSIS_VE
       return 403;
     case "AUTH_REQUIRED":
     case "ANALYSIS_VERSION_MISMATCH":
+    case "BUSY":
       return 409;
     case "REFUSED":
       return 422;
@@ -87,6 +99,51 @@ function parseMeta(raw: unknown): AnalyzeMeta {
   };
 }
 
+const MAX_PHOTOS_PER_POST = 50;
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+const strList = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").map((x) => x.slice(0, 300)) : []);
+
+/** 원고 생성 요청 검사. 사진은 postOrder 순서로 정렬해 돌려준다. */
+export function parseGenerateBody(body: any): { providerId: ProviderId; input: WritingInput } {
+  if (!body || typeof body !== "object") throw new BadRequest("요청 본문이 JSON이 아닙니다.");
+  if (body.provider !== "claude" && body.provider !== "codex") throw new BadRequest("provider는 claude 또는 codex여야 합니다.");
+  const photos = body.photos;
+  if (!Array.isArray(photos) || photos.length === 0 || photos.length > MAX_PHOTOS_PER_POST) {
+    throw new BadRequest(`photos는 1~${MAX_PHOTOS_PER_POST}개여야 합니다.`);
+  }
+  const parsed: WritingPhoto[] = photos.map((p: any, i: number) => {
+    if (typeof p?.photoId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(p.photoId)) throw new BadRequest(`${i + 1}번째 사진의 photoId가 올바르지 않습니다.`);
+    if (!Number.isInteger(p.postOrder)) throw new BadRequest(`사진 ${p.photoId}의 postOrder가 없습니다.`);
+    const a = p.analysis;
+    if (!a || typeof a.description !== "string" || !a.description.trim()) throw new BadRequest(`사진 ${p.photoId}의 분석 결과가 없습니다. 먼저 사진 분석을 하세요.`);
+    return {
+      photoId: p.photoId,
+      postOrder: p.postOrder,
+      analysis: {
+        type: PHOTO_TYPES.includes(a.type) ? a.type : "other",
+        description: str(a.description, 1000),
+        visibleText: str(a.visibleText, 1000),
+        tags: strList(a.tags),
+        uncertain: strList(a.uncertain),
+      },
+    };
+  });
+  if (new Set(parsed.map((p) => p.photoId)).size !== parsed.length) throw new BadRequest("photoId가 중복됩니다.");
+  if (new Set(parsed.map((p) => p.postOrder)).size !== parsed.length) throw new BadRequest("postOrder가 중복됩니다.");
+  parsed.sort((a, b) => a.postOrder - b.postOrder);
+  const style = body.style && typeof body.style === "object" ? body.style : {};
+  return {
+    providerId: body.provider,
+    input: {
+      category: str(body.category, 30),
+      subjectName: str(body.subjectName, 100),
+      memo: str(body.memo, 5000),
+      style: Object.fromEntries(Object.entries(style).map(([k, v]) => [k, str(v, 1000)])),
+      photos: parsed,
+    },
+  };
+}
+
 const isJpeg = (bytes: Buffer) => bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 
 /** 파일 이름(photoId.jpg)으로 사진을 찾아 meta.photoIds 순서대로 정렬한다. */
@@ -111,6 +168,8 @@ export function createApp({ appToken, providers, now = Date.now, log = console.l
   const startedAt = new Date(now()).toISOString();
   const statusCache = new Map<ProviderId, { at: number; value: Promise<ProviderStatus> }>();
   const modelCalls = new Semaphore(MODEL_CONCURRENCY);
+  /** 원고 생성은 한 번에 하나만 */
+  let generating = false;
 
   // 요청 한 줄 로그. 본문, 사진, 분석 결과, 토큰은 남기지 않는다.
   app.use("*", async (c, next) => {
@@ -196,6 +255,67 @@ export function createApp({ appToken, providers, now = Date.now, log = console.l
         return c.json({ error: { code: e.code, message: e.message } }, httpStatusFor(e.code));
       }
       throw e;
+    }
+  });
+
+  /**
+   * 원고 생성. 사진 파일은 받지 않고, 앱에 저장된 해당 Provider의 사진 분석만 받는다.
+   * 구조 문제가 있으면 1회만 수정 요청하고, 그래도 안 되면 INVALID_OUTPUT.
+   */
+  app.post("/v1/posts/generate", bodyLimit({ maxSize: 2 * 1024 * 1024 }), async (c) => {
+    let providerId: ProviderId;
+    let input: WritingInput;
+    try {
+      ({ providerId, input } = parseGenerateBody(await c.req.json().catch(() => null)));
+    } catch (e) {
+      if (e instanceof BadRequest) return c.json({ error: { code: "BAD_REQUEST", message: e.message } }, 400);
+      throw e;
+    }
+    if (generating) {
+      return c.json({ error: { code: "BUSY", message: "PC에서 다른 원고를 만드는 중입니다. 끝난 뒤 다시 시도하세요." } }, httpStatusFor("BUSY"));
+    }
+    generating = true;
+    const provider = providers[providerId];
+    try {
+      const status = await statusOf(provider, false);
+      if (!status.ready) {
+        const code = status.code as CallErrorCode;
+        return c.json({ error: { code, message: status.message } }, httpStatusFor(code));
+      }
+      const call = (instructions: string, timeoutMs: number) =>
+        modelCalls.run(() =>
+          provider.generateStructured({ purpose: "writing", instructions, images: [], schema: writingSchema as unknown as Record<string, unknown>, timeoutMs }),
+        );
+
+      let result = await call(buildWritingPrompt(input), WRITING_TIMEOUT_MS);
+      let problems = findStructureProblems(result.output, input.photos.length);
+      let repaired: string[] | null = null;
+      if (problems.length > 0) {
+        repaired = problems;
+        result = await call(buildRepairPrompt(input, result.output, problems), REPAIR_TIMEOUT_MS);
+        problems = findStructureProblems(result.output, input.photos.length);
+        if (problems.length > 0) {
+          return c.json(
+            { error: { code: "INVALID_OUTPUT", message: `원고 구조를 1회 수정했지만 여전히 문제가 있습니다: ${problems.join(" / ")}` } },
+            httpStatusFor("INVALID_OUTPUT"),
+          );
+        }
+      }
+      const { draft, validation } = finalizeDraft(result.output, input.photos, repaired);
+      return c.json({
+        provider: providerId,
+        model: result.model,
+        post: draft,
+        validation: { repaired: repaired !== null, items: validation },
+      });
+    } catch (e) {
+      if (e instanceof ProviderCallError) {
+        if (["AUTH_REQUIRED", "API_KEY_BLOCKED", "BILLING_RISK", "USAGE_LIMIT"].includes(e.code)) statusCache.delete(provider.id);
+        return c.json({ error: { code: e.code, message: e.message } }, httpStatusFor(e.code));
+      }
+      throw e;
+    } finally {
+      generating = false;
     }
   });
 

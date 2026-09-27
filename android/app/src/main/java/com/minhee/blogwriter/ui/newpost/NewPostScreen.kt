@@ -60,10 +60,18 @@ private const val GRID_COLUMNS = 4
 @Composable
 fun NewPostScreen(
     onBack: () -> Unit,
+    onOpenResult: (String) -> Unit,
     viewModel: NewPostViewModel = viewModel(factory = NewPostViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.openResultFor) {
+        state.openResultFor?.let {
+            viewModel.resultOpened()
+            onOpenResult(it)
+        }
+    }
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -103,7 +111,8 @@ fun NewPostScreen(
         }
 
         val photos = draft.photosInPostOrder()
-        val analyzing = state.analysis.running
+        // 분석·생성 중에는 사진 편집과 Provider 변경을 막는다.
+        val analyzing = state.busy
         var detailPhotoId by remember { mutableStateOf<String?>(null) }
         detailPhotoId?.let { id ->
             photos.find { it.id == id }?.let { photo ->
@@ -202,6 +211,7 @@ fun NewPostScreen(
                 AnalysisSection(
                     draft = draft,
                     state = state.analysis,
+                    locked = state.busy,
                     onSelectProvider = viewModel::selectProvider,
                     onAnalyze = viewModel::analyzePhotos,
                     onReanalyzeAll = viewModel::reanalyzeAll,
@@ -209,16 +219,12 @@ fun NewPostScreen(
             }
 
             item {
-                Column {
-                    Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                        Text("원고 생성")
-                    }
-                    Text(
-                        "원고 생성은 다음 단계에서 연결돼요. 지금 입력한 내용과 사진 분석 결과는 자동 저장돼요.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
+                GenerateSection(
+                    draft = draft,
+                    state = state,
+                    onGenerate = { viewModel.generate() },
+                    onOpenResult = { onOpenResult(draft.id) },
+                )
             }
 
             if (BuildConfig.DEBUG) {

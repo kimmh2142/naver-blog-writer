@@ -165,6 +165,84 @@ test("분석: 결과 형식이 틀리면 INVALID_OUTPUT, 일부 누락은 그 �
   assert.deepEqual(body.failed.map((f: any) => f.photoId), ["b2"]);
 });
 
+const genBody = {
+  provider: "claude",
+  category: "TRAVEL",
+  subjectName: "군산",
+  memo: "엄마랑 다녀옴",
+  style: { endings: "~했어요" },
+  photos: [
+    { photoId: "b2", postOrder: 1, analysis: { type: "food", description: "짬뽕", visibleText: "", tags: [], uncertain: [] } },
+    { photoId: "a1", postOrder: 0, analysis: { type: "exterior", description: "건물", visibleText: "초원사진관", tags: [], uncertain: [] } },
+  ],
+};
+const goodDraft = {
+  titleCandidates: ["t1", "t2", "t3"],
+  blocks: [
+    { type: "imageGroup", text: "", photoRefs: ["1", "2"] },
+    { type: "paragraph", text: "본문 [확인 필요: 식당 이름]", photoRefs: [] },
+  ],
+  hashtags: ["#군산"],
+  confirmNeeded: [],
+};
+const postGenerate = (app: ReturnType<typeof createApp>) =>
+  app.request("/v1/posts/generate", { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(genBody) });
+
+test("원고 생성: 사진 없이 분석만 보내고, 번호를 photoId로 되돌리고 확인 필요를 동기화", async () => {
+  const { app, claude } = setup({ t: 0 }, async () => ({ output: goodDraft, model: "claude-opus-5-5", usage: null }));
+  const res = await postGenerate(app);
+  assert.equal(res.status, 200);
+  const body: any = await res.json();
+  assert.equal(body.model, "claude-opus-5-5");
+  assert.deepEqual(body.post.blocks[0].photoIds, ["a1", "b2"]); // postOrder 순서
+  assert.deepEqual(body.post.confirmNeeded, ["식당 이름"]);
+  assert.equal(body.validation.repaired, false);
+  assert.equal(claude.requests.length, 1);
+  assert.equal(claude.requests[0].purpose, "writing");
+  assert.equal(claude.requests[0].images.length, 0);
+  assert.match(claude.requests[0].instructions, /사진 1: 종류 exterior/);
+});
+
+test("원고 생성: 구조 문제가 있으면 1회만 수정 요청", async () => {
+  const outputs = [{ ...goodDraft, blocks: [{ type: "imageGroup", text: "", photoRefs: ["2", "1"] }, goodDraft.blocks[1]] }, goodDraft];
+  const { app, claude } = setup({ t: 0 }, async () => ({ output: outputs.shift(), model: "m", usage: null }));
+  const body: any = await (await postGenerate(app)).json();
+  assert.equal(body.validation.repaired, true);
+  assert.equal(claude.requests.length, 2);
+  assert.match(claude.requests[1].instructions, /구조 문제/);
+
+  const bad = setup({ t: 0 }, async () => ({ output: { ...goodDraft, titleCandidates: ["하나"] }, model: "m", usage: null }));
+  const res = await postGenerate(bad.app);
+  assert.equal(res.status, 502);
+  assert.equal(((await res.json()) as any).error.code, "INVALID_OUTPUT");
+  assert.equal(bad.claude.requests.length, 2); // 원래 1회 + 수정 1회, 그 이상은 없음
+});
+
+test("원고 생성: 한 번에 하나만 (진행 중이면 BUSY)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const { app } = setup({ t: 0 }, async () => {
+    await gate;
+    return { output: goodDraft, model: "m", usage: null };
+  });
+  const first = postGenerate(app);
+  await new Promise((r) => setTimeout(r, 20));
+  const second = await postGenerate(app);
+  assert.equal(second.status, 409);
+  assert.equal(((await second.json()) as any).error.code, "BUSY");
+  release();
+  assert.equal((await first).status, 200);
+});
+
+test("원고 생성: 호출 중 한도 도달이면 코드 그대로", async () => {
+  const { app } = setup({ t: 0 }, async () => {
+    throw new ProviderCallError("USAGE_LIMIT", "한도 도달");
+  });
+  const res = await postGenerate(app);
+  assert.equal(res.status, 429);
+  assert.equal(((await res.json()) as any).error.code, "USAGE_LIMIT");
+});
+
 test("설정: 토큰이 짧으면 거부, 모델 기본값과 빈 값 처리", () => {
   assert.throws(() => readConfig({ BRIDGE_APP_TOKEN: "short" }), ConfigError);
   const config = readConfig({ BRIDGE_APP_TOKEN: TOKEN, CODEX_WRITING_MODEL: " " });

@@ -43,5 +43,6 @@ class AppContainer(context: Context) {
         config = generationConfig,
         prepareImage = { photo -> aiImagePreparer.prepare(photo).file },
         analyze = bridgeApi::analyzePhotos,
+        generate = bridgeApi::generatePost,
     )
 }

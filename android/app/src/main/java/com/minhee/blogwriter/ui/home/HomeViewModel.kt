@@ -20,6 +20,8 @@ data class DraftSummary(
     val category: Category,
     val photoCount: Int,
     val updatedAt: Long,
+    /** 저장된 원고를 만든 AI 이름. 원고가 없으면 null */
+    val resultBy: String? = null,
 )
 
 data class HomeUiState(
@@ -46,6 +48,7 @@ class HomeViewModel(
                             category = draft.category,
                             photoCount = draft.photos.size,
                             updatedAt = draft.updatedAt,
+                            resultBy = draft.result?.generatedBy?.providerLabel,
                         )
                     },
             )

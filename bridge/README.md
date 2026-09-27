@@ -50,8 +50,18 @@ npm.cmd start                # Ctrl+C로 종료
 | `GET /v1/status` | 두 Provider의 로그인, 과금 안전, 사용량 상태. 30초 캐시, `?refresh=1`로 새로 확인. 모델 호출 없음 |
 | `POST /v1/photos/analyze` | 사진 한 배치(최대 10장) 분석. multipart: `meta`(JSON: provider, analysisVersion, photoIds, category, subjectName) + `photo` 파트들(파일 이름 = `photoId.jpg`, JPEG만). 호출 전 상태 확인에 걸리면 모델을 부르지 않음 |
 
-모든 요청에 `Authorization: Bearer <BRIDGE_APP_TOKEN>`이 필요합니다. 로그에는 경로, 상태 코드, 시간만 남기고 사진·분석 내용은 남기지 않습니다.
+| `POST /v1/posts/generate` | 원고 생성. JSON: provider, category, subjectName, memo, style, photos[{photoId, postOrder, analysis}]. **사진 파일은 받지 않고** 해당 Provider의 사진 분석만 받는다. 한 번에 1건(진행 중이면 `BUSY`) |
+
+모든 요청에 `Authorization: Bearer <BRIDGE_APP_TOKEN>`이 필요합니다. 로그에는 경로, 상태 코드, 시간만 남기고 사진·분석·원고 내용은 남기지 않습니다.
 모델 호출은 동시에 2개까지만 실행합니다.
+
+### 원고 생성 규칙
+- 지시문은 출처별로 나눈다: `[작성 정보]`, `[사용자 메모]`(1인칭 경험의 유일한 출처), `[사진 분석]`(관찰만), `[문체 설정]`.
+- AI는 사진을 번호(포스팅 순서 1~N)로만 가리키고, 브리지가 photoId로 되돌린다.
+- 코드 검사: 스키마, 제목 후보 3개, 없는 번호, 누락, 중복, 순서, 연속되지 않은 사진 그룹.
+  문제가 있으면 **같은 AI로 1회만** 수정 요청하고, 그래도 안 되면 `INVALID_OUTPUT`.
+- 본문의 `[확인 필요: X]`는 코드가 `confirmNeeded`에 자동으로 추가한다. 사진 분석에 불확실 항목이 있는데 목록이 비면 경고만 한다.
+- 사실 점검용 추가 AI 호출은 하지 않는다.
 
 ### 사진을 남기지 않는 방식
 - Claude: 사진을 메모리에서 base64로만 넘기고, `persistSession: false`로 대화 기록을 저장하지 않습니다.
@@ -65,7 +75,7 @@ npm.cmd start                # Ctrl+C로 종료
 |---|---|---|
 | `BAD_REQUEST` | 400 | 요청 형식 오류 |
 | `API_KEY_BLOCKED`, `BILLING_RISK` | 403 | 과금 방어로 차단 |
-| `AUTH_REQUIRED`, `ANALYSIS_VERSION_MISMATCH` | 409 | 구독 로그인 필요 / 앱과 브리지의 분석 버전이 다름 |
+| `AUTH_REQUIRED`, `ANALYSIS_VERSION_MISMATCH`, `BUSY` | 409 | 구독 로그인 필요 / 앱과 브리지의 분석 버전이 다름 / 다른 원고 생성 중 |
 | `REFUSED` | 422 | AI가 요청을 거절 |
 | `USAGE_LIMIT` | 429 | 구독 사용량 한도 |
 | `INVALID_OUTPUT`, `ERROR` | 502 | 결과 형식 오류 / 그 밖의 호출 실패 |

@@ -13,6 +13,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.minhee.blogwriter.appContainer
 import com.minhee.blogwriter.data.BlogGenerationRepository
 import com.minhee.blogwriter.data.DraftRepository
+import com.minhee.blogwriter.data.StyleRepository
+import kotlinx.coroutines.flow.first
 import com.minhee.blogwriter.data.model.AiProviderId
 import com.minhee.blogwriter.data.GenerationConfig
 import com.minhee.blogwriter.data.PhotoOrdering
@@ -52,13 +54,26 @@ data class AnalysisUiState(
     val error: String? = null,
 )
 
+/** 원고 생성 상태. 실패해도 draft.result(이전 원고)는 그대로 둔다. */
+data class GenerationUiState(
+    val running: Boolean = false,
+    val provider: AiProviderId? = null,
+    val error: String? = null,
+)
+
 data class NewPostUiState(
     val draft: PostDraft? = null,
     val importingPhotos: Boolean = false,
     val message: String? = null,
     val resizeTest: ResizeTestState = ResizeTestState.Idle,
     val analysis: AnalysisUiState = AnalysisUiState(),
-)
+    val generation: GenerationUiState = GenerationUiState(),
+    /** 원고가 만들어지면 결과 화면으로 이동할 작성 건 id (한 번 쓰고 비운다) */
+    val openResultFor: String? = null,
+) {
+    /** 분석이나 생성이 진행 중이면 Provider 변경·사진 편집·중복 요청을 막는다. */
+    val busy: Boolean get() = analysis.running || generation.running
+}
 
 class NewPostViewModel(
     savedStateHandle: SavedStateHandle,
@@ -69,7 +84,10 @@ class NewPostViewModel(
     private val generationConfig: GenerationConfig,
     private val appScope: CoroutineScope,
     private val generationRepository: BlogGenerationRepository,
+    private val styleRepository: StyleRepository,
 ) : ViewModel() {
+
+    private val handle = savedStateHandle
 
     // 새 작성 건이면 id를 만들어 SavedStateHandle에 넣어 둔다. 프로세스가 죽었다 살아나도 같은 id로 복원된다.
     private val draftId: String = savedStateHandle.get<String>(ARG_DRAFT_ID)
@@ -90,6 +108,12 @@ class NewPostViewModel(
             val now = System.currentTimeMillis()
             val draft = existing ?: PostDraft(id = draftId, createdAt = now, updatedAt = now)
             _state.update { it.copy(draft = draft) }
+            // 결과 화면의 "다른 AI로 다시 생성"으로 들어온 경우 한 번만 생성한다(화면 복원 때 다시 돌지 않게).
+            val regenerate = handle.get<String>(ARG_REGENERATE)
+            if (regenerate != null && handle.get<Boolean>(KEY_REGENERATE_DONE) != true) {
+                handle[KEY_REGENERATE_DONE] = true
+                AiProviderId.entries.find { it.id == regenerate }?.let { generate(it) }
+            }
         }
     }
 
@@ -161,10 +185,49 @@ class NewPostViewModel(
     }
 
     fun selectProvider(provider: AiProviderId) {
-        if (_state.value.analysis.running) return
+        if (_state.value.busy) return
         edit(immediate = true) { it.copy(selectedProvider = provider.id) }
-        _state.update { it.copy(analysis = AnalysisUiState()) }
+        _state.update { it.copy(analysis = AnalysisUiState(), generation = GenerationUiState()) }
     }
+
+    /**
+     * 선택한 Provider로 원고를 만든다. 사진은 다시 보내지 않고 그 Provider의 사진 분석만 쓴다.
+     * 분석이 없는 사진이 있으면 호출하지 않고 안내한다. 실패해도 이전 원고는 지우지 않는다.
+     */
+    fun generate(provider: AiProviderId? = null) {
+        val current = _state.value.draft ?: return
+        if (_state.value.busy) return
+        val target = provider ?: current.provider
+        if (target != current.provider) edit(immediate = true) { it.copy(selectedProvider = target.id) }
+        viewModelScope.launch {
+            _state.update { it.copy(generation = GenerationUiState(running = true, provider = target)) }
+            val style = styleRepository.profile.first()
+            val draft = _state.value.draft ?: return@launch
+            when (val outcome = generationRepository.generatePost(draft, target, style)) {
+                is BlogGenerationRepository.GenerateOutcome.NeedsAnalysis -> _state.update {
+                    it.copy(
+                        generation = GenerationUiState(
+                            provider = target,
+                            error = if (outcome.missing == 0) {
+                                "사진을 먼저 추가하세요."
+                            } else {
+                                "${target.label} 사진 분석이 먼저 필요해요 (${outcome.missing}장). 위의 사진 분석을 먼저 해 주세요."
+                            },
+                        ),
+                    )
+                }
+                is BlogGenerationRepository.GenerateOutcome.Failed -> _state.update {
+                    it.copy(generation = GenerationUiState(provider = target, error = outcome.error.message))
+                }
+                is BlogGenerationRepository.GenerateOutcome.Success -> {
+                    edit(immediate = true) { it.copy(result = outcome.post) }
+                    _state.update { it.copy(generation = GenerationUiState(provider = target), openResultFor = draftId) }
+                }
+            }
+        }
+    }
+
+    fun resultOpened() = _state.update { it.copy(openResultFor = null) }
 
     /**
      * 선택한 Provider로 아직 분석이 없는(또는 실패한, 버전이 다른) 사진만 분석한다.
@@ -172,7 +235,7 @@ class NewPostViewModel(
      */
     fun analyzePhotos() {
         val draft = _state.value.draft ?: return
-        if (_state.value.analysis.running) return
+        if (_state.value.busy) return
         val provider = draft.provider
         val total = generationRepository.photosToAnalyze(draft, provider).size
         if (total == 0) return
@@ -203,7 +266,7 @@ class NewPostViewModel(
 
     /** 선택한 Provider의 분석 결과만 지우고 전체를 다시 분석한다. 다른 Provider 결과는 그대로 둔다. */
     fun reanalyzeAll() {
-        if (_state.value.analysis.running) return
+        if (_state.value.busy) return
         val provider = _state.value.draft?.provider ?: return
         edit(immediate = true) { draft ->
             draft.copy(photos = draft.photos.map { it.copy(analyses = it.analyses - provider.id) })
@@ -313,6 +376,8 @@ class NewPostViewModel(
         private const val TAG = "NewPostViewModel"
         private const val ARG_DRAFT_ID = "draftId"
         private const val KEY_NEW_DRAFT_ID = "newDraftId"
+        private const val ARG_REGENERATE = "regenerate"
+        private const val KEY_REGENERATE_DONE = "regenerateDone"
         private const val SAVE_DEBOUNCE_MS = 400L
 
         val Factory = viewModelFactory {
@@ -327,6 +392,7 @@ class NewPostViewModel(
                     generationConfig = c.generationConfig,
                     appScope = c.appScope,
                     generationRepository = c.blogGenerationRepository,
+                    styleRepository = c.styleRepository,
                 )
             }
         }

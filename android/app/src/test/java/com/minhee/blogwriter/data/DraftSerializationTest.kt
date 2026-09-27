@@ -34,7 +34,7 @@ class DraftSerializationTest {
 
     @Test
     fun unknownFieldsFromNewerVersionsAreIgnored() {
-        val json = """{"id":"d2","createdAt":1,"updatedAt":2,"result":{"titles":["a"]},
+        val json = """{"id":"d2","createdAt":1,"updatedAt":2,"someFutureField":{"titles":["a"]},
             "photos":[{"id":"p","originalUri":"u","originalIndex":0,"postOrder":0,"analysis":{"type":"food"}}]}"""
         val decoded = AppJson.decodeFromString<PostDraft>(json)
         assertEquals("d2", decoded.id)

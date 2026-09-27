@@ -59,6 +59,7 @@ class BlogGenerationRepositoryTest {
             rec.sentBatches += ids
             respond(ids)
         },
+        generate = { error("이 테스트에서는 원고 생성을 부르지 않음") },
         clock = { 42 },
     )
 

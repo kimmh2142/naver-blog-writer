@@ -44,6 +44,8 @@ fun analysisMark(photo: PostPhoto, provider: AiProviderId): String {
 fun AnalysisSection(
     draft: PostDraft,
     state: AnalysisUiState,
+    /** 분석이나 원고 생성이 진행 중이면 true */
+    locked: Boolean,
     onSelectProvider: (AiProviderId) -> Unit,
     onAnalyze: () -> Unit,
     onReanalyzeAll: () -> Unit,
@@ -62,7 +64,7 @@ fun AnalysisSection(
                 FilterChip(
                     selected = id == provider,
                     onClick = { onSelectProvider(id) },
-                    enabled = !state.running,
+                    enabled = !locked,
                     label = { Text(id.label) },
                 )
             }
@@ -82,7 +84,7 @@ fun AnalysisSection(
 
         Button(
             onClick = onAnalyze,
-            enabled = !state.running && pending > 0,
+            enabled = !locked && pending > 0,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
@@ -94,7 +96,7 @@ fun AnalysisSection(
                 },
             )
         }
-        if (analyzed > 0 && !state.running) {
+        if (analyzed > 0 && !locked) {
             TextButton(onClick = { confirmReanalyze = true }) { Text("${provider.label} 분석 지우고 처음부터 다시") }
         }
         Text(

@@ -4,6 +4,8 @@ import com.minhee.blogwriter.data.AppJson
 import com.minhee.blogwriter.data.model.AiProviderId
 import com.minhee.blogwriter.data.model.BridgeStatus
 import com.minhee.blogwriter.data.model.PhotoAnalysis
+import com.minhee.blogwriter.data.model.PostBlock
+import com.minhee.blogwriter.data.model.ValidationItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -64,6 +66,39 @@ data class AnalyzedPhoto(val photoId: String, val analysis: PhotoAnalysis)
 @Serializable
 data class FailedPhoto(val photoId: String, val reason: String)
 
+/** 원고 생성 요청. 사진 파일 없이, 해당 Provider의 사진 분석만 보낸다. */
+@Serializable
+data class GenerateRequest(
+    val provider: String,
+    val category: String,
+    val subjectName: String,
+    val memo: String,
+    val style: Map<String, String>,
+    val photos: List<GeneratePhoto>,
+)
+
+@Serializable
+data class GeneratePhoto(val photoId: String, val postOrder: Int, val analysis: PhotoAnalysis)
+
+@Serializable
+data class GenerateResponse(
+    val provider: String,
+    val model: String? = null,
+    val post: GeneratedDraft,
+    val validation: GenerateValidation = GenerateValidation(),
+)
+
+@Serializable
+data class GeneratedDraft(
+    val titleCandidates: List<String>,
+    val blocks: List<PostBlock>,
+    val hashtags: List<String> = emptyList(),
+    val confirmNeeded: List<String> = emptyList(),
+)
+
+@Serializable
+data class GenerateValidation(val repaired: Boolean = false, val items: List<ValidationItem> = emptyList())
+
 @Serializable
 private data class AnalyzeMeta(
     val provider: String,
@@ -119,6 +154,15 @@ class BridgeApi(
         // 모델 호출이라 오래 걸릴 수 있다(브리지 시간 제한 150초 + 대기).
         val slow = client.newBuilder().readTimeout(ANALYZE_READ_TIMEOUT_S, TimeUnit.SECONDS).build()
         return execute(Request.Builder().url(url).post(body), slow) { AppJson.decodeFromString<AnalyzeResponse>(it) }
+    }
+
+    /** 원고 생성. 브리지는 원고 작성 1회(구조 문제 시 수정 1회 더)를 하므로 오래 걸릴 수 있다. */
+    suspend fun generatePost(request: GenerateRequest): BridgeResult<GenerateResponse> {
+        val root = rootOrNull() ?: return notConfigured()
+        val url = root.newBuilder().addPathSegments("v1/posts/generate").build()
+        val body = AppJson.encodeToString(GenerateRequest.serializer(), request).toRequestBody(JSON)
+        val slow = client.newBuilder().readTimeout(GENERATE_READ_TIMEOUT_S, TimeUnit.SECONDS).build()
+        return execute(Request.Builder().url(url).post(body), slow) { AppJson.decodeFromString<GenerateResponse>(it) }
     }
 
     private fun rootOrNull(): HttpUrl? = baseUrl.toHttpUrlOrNull()?.takeIf { token.isNotBlank() }
@@ -184,6 +228,9 @@ class BridgeApi(
         private val JSON = "application/json; charset=utf-8".toMediaType()
         private val JPEG = "image/jpeg".toMediaType()
         private const val ANALYZE_READ_TIMEOUT_S = 240L
+
+        // 브리지: 작성 240초 + 구조 수정 150초 + 여유
+        private const val GENERATE_READ_TIMEOUT_S = 420L
 
         // Claude 상태 확인은 CLI를 띄우므로 수 초가 걸릴 수 있다.
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

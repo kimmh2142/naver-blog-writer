@@ -53,6 +53,8 @@ data class PostDraft(
     val photos: List<PostPhoto> = emptyList(),
     /** 이 작성 건에서 마지막으로 고른 AI (AiProviderId.id). 없으면 Claude. */
     val selectedProvider: String? = null,
+    /** 마지막으로 만든 원고. 새로 생성에 실패해도 지우지 않는다. */
+    val result: GeneratedPost? = null,
 ) {
     val provider: AiProviderId
         get() = AiProviderId.entries.find { it.id == selectedProvider } ?: AiProviderId.CLAUDE
