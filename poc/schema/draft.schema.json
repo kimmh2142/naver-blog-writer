@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["photos", "titles", "blocks", "hashtags", "confirmNeeded"],
+  "properties": {
+    "photos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["photoId", "description"],
+        "properties": {
+          "photoId": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "titles": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "text", "photoIds"],
+        "properties": {
+          "type": { "type": "string", "enum": ["heading", "paragraph", "imageGroup"] },
+          "text": { "type": "string" },
+          "photoIds": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "hashtags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confirmNeeded": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "timeoutMs": 600000,
+  "claude": {
+    "model": "opus",
+    "effort": null,
+    "maxTurns": 5
+  },
+  "codex": {
+    "model": null,
+    "reasoningEffort": null
+  }
+}

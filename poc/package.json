@@ -1,0 +1,30 @@
+{
+  "name": "naver-blog-writer-poc",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Claude(구독) vs Codex(ChatGPT 로그인) 블로그 초안 비교 PoC. Phase 2 구현과 무관.",
+  "type": "module",
+  "scripts": {
+    "prepare-photos": "tsx src/prepare-photos.ts",
+    "login:claude": "tsx src/login.ts claude",
+    "login:codex": "tsx src/login.ts codex",
+    "check-auth": "tsx src/check-auth.ts",
+    "run": "tsx src/run.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.283",
+    "@openai/codex-sdk": "^0.157.1",
+    "ajv": "^8.20.0",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

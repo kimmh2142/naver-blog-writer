@@ -23,6 +23,12 @@ captures/
 *service-account*.json
 *credentials*.json
 
+# PoC: 개인 사진/메모/결과, 구독 로그인 정보, 작업 폴더는 절대 커밋하지 않는다
+poc/samples/
+poc/out/
+poc/.auth/
+poc/.work/
+
 # Node (Phase 2 backend)
 node_modules/
 dist/
