@@ -1,6 +1,8 @@
 package com.minhee.blogwriter.data.remote
 
+import com.minhee.blogwriter.data.model.AiProviderId
 import kotlinx.coroutines.test.runTest
+import java.io.File
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -79,6 +81,50 @@ class BridgeApiTest {
         val api = api()
         server.shutdown()
         assertEquals(BridgeErrorKind.PC_UNREACHABLE, (api.status(false) as BridgeResult.Err).error.kind)
+    }
+
+    @Test
+    fun analyzeSendsMetaAndJpegFilePartsInOrder() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"provider":"codex","model":"gpt-6-astra","analysisVersion":"v1",
+                   "results":[{"photoId":"p-2","analysis":{"type":"food","description":"짬뽕","visibleText":"","tags":["짬뽕"],"uncertain":["양산인지 우산인지 불확실"]}}],
+                   "failed":[{"photoId":"p-1","reason":"분석 결과에 이 사진이 없음"}]}""",
+            ),
+        )
+        val first = File.createTempFile("photo-a", ".jpg").apply { writeBytes(byteArrayOf(-1, -40, -1, 1)); deleteOnExit() }
+        val second = File.createTempFile("photo-b", ".jpg").apply { writeBytes(byteArrayOf(-1, -40, -1, 2)); deleteOnExit() }
+
+        val result = api().analyzePhotos(AiProviderId.CODEX, "RESTAURANT", "돈거돈락", listOf("p-1" to first, "p-2" to second))
+
+        val request = server.takeRequest()
+        assertEquals("/v1/photos/analyze", request.path)
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data"))
+        val body = request.body.readUtf8()
+        assertTrue(body.contains(""""provider":"codex""""))
+        assertTrue(body.contains(""""analysisVersion":"v1""""))
+        assertTrue(body.contains(""""photoIds":["p-1","p-2"]"""))
+        assertTrue(body.indexOf("""filename="p-1.jpg"""") < body.indexOf("""filename="p-2.jpg""""))
+        assertTrue(body.contains("Content-Type: image/jpeg"))
+
+        val response = (result as BridgeResult.Ok).value
+        assertEquals("gpt-6-astra", response.model)
+        assertEquals(listOf("양산인지 우산인지 불확실"), response.results.single().analysis.uncertain)
+        assertEquals("p-1", response.failed.single().photoId)
+    }
+
+    @Test
+    fun bridgeErrorCodeIsKeptEvenOn502() = runTest {
+        // 브리지 JSON 오류는 코드 그대로, JSON이 아닌 502는 브리지 미실행
+        server.enqueue(MockResponse().setResponseCode(502).setBody("""{"error":{"code":"INVALID_OUTPUT","message":"분석 결과 형식 오류"}}"""))
+        val error = (api().status(false) as BridgeResult.Err).error
+        assertEquals(BridgeErrorKind.SERVER, error.kind)
+        assertEquals("INVALID_OUTPUT", error.code)
+
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":{"code":"BILLING_RISK","message":"초과 사용 켜짐"}}"""))
+        val blocked = (api().status(false) as BridgeResult.Err).error
+        assertEquals("BILLING_RISK", blocked.code)
+        assertEquals("초과 사용 켜짐", blocked.message)
     }
 
     @Test

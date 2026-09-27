@@ -25,10 +25,6 @@ const risky = Object.keys(process.env).filter(
 );
 if (risky.length) console.warn(`참고: 다음 환경변수는 AI 호출에 전달되지 않습니다: ${risky.join(", ")}`);
 
-// 이전 실행에서 남은 임시 파일 정리
-rmSync(dirs.workDir, { recursive: true, force: true });
-mkdirSync(dirs.workDir, { recursive: true });
-
 const app = createApp({
   appToken: config.appToken,
   providers: {
@@ -38,6 +34,9 @@ const app = createApp({
 });
 
 const server = serve({ fetch: app.fetch, hostname: HOST, port: config.port }, (info) => {
+  // 포트를 잡은 뒤에만 이전 실행에서 남은 임시 파일을 정리한다(이미 실행 중인 브리지의 폴더를 지우지 않게).
+  rmSync(dirs.workDir, { recursive: true, force: true });
+  mkdirSync(dirs.workDir, { recursive: true });
   console.log(`브리지 실행 중: http://${HOST}:${info.port} (이 PC 안에서만 열림)`);
   console.log(`휴대폰에서 쓰려면 다른 PowerShell 창에서 한 번: tailscale serve --bg ${info.port}`);
   console.log("종료: Ctrl+C");

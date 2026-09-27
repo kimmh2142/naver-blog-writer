@@ -63,6 +63,19 @@ export type CodexAccountSnapshot = {
   rateLimits: unknown;
 };
 
+/** 구독 기본 모델 이름 (model/list의 isDefault). 결과 기록용이며 실패하면 null. */
+export async function readCodexDefaultModel(env: Record<string, string>): Promise<string | null> {
+  try {
+    return await withCodexAppServer(env, async (call) => {
+      const list = await call("model/list", { limit: 50, includeHidden: false });
+      const models: { model?: string; isDefault?: boolean }[] = list?.data ?? [];
+      return models.find((m) => m.isDefault)?.model ?? null;
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** 계정 유형과 사용량 한도를 함께 읽는다. 이메일은 기록하지 않는다. */
 export async function readCodexAccount(env: Record<string, string>): Promise<CodexAccountSnapshot> {
   return withCodexAppServer(env, async (call) => {

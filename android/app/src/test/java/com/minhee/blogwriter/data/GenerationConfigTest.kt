@@ -51,7 +51,7 @@ class GenerationConfigTest {
     fun buildConfigDefaults() {
         val c = GenerationConfig.fromBuildConfig()
         assertEquals(5, c.analysisBatchSize)
-        assertEquals(3, c.analysisConcurrency)
+        assertEquals(2, c.analysisConcurrency)
         assertEquals(1280, c.aiImageLongEdgePx)
         assertEquals(80, c.aiImageJpegQuality)
     }

@@ -26,7 +26,17 @@ data class PostPhoto(
     val postOrder: Int,
     val takenAt: Long? = null,
     val mimeType: String? = null,
-)
+    /** Provider별 사진 분석 캐시. key = AiProviderId.id ("claude", "codex"). Provider끼리 공유하지 않는다. */
+    val analyses: Map<String, PhotoAnalysisEntry> = emptyMap(),
+) {
+    fun analysisFor(provider: AiProviderId): PhotoAnalysisEntry? = analyses[provider.id]
+
+    /** 같은 Provider에 현재 버전으로 성공한 분석이 있으면 재사용한다. 모델 이름은 판단에 쓰지 않는다. */
+    fun needsAnalysis(provider: AiProviderId): Boolean {
+        val entry = analysisFor(provider) ?: return true
+        return entry.analysis == null || entry.version != PhotoAnalysis.CURRENT_VERSION
+    }
+}
 
 /** 작성 중인 포스팅 한 건. filesDir/drafts/{id}.json 에 통째로 저장된다. */
 @Serializable
@@ -41,7 +51,12 @@ data class PostDraft(
     val campaignRawText: String = "",
     val sortByTakenAt: Boolean = false,
     val photos: List<PostPhoto> = emptyList(),
+    /** 이 작성 건에서 마지막으로 고른 AI (AiProviderId.id). 없으면 Claude. */
+    val selectedProvider: String? = null,
 ) {
+    val provider: AiProviderId
+        get() = AiProviderId.entries.find { it.id == selectedProvider } ?: AiProviderId.CLAUDE
+
     val isBlank: Boolean
         get() = subjectName.isBlank() && memo.isBlank() && campaignRawText.isBlank() && photos.isEmpty()
 

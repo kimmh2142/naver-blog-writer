@@ -34,7 +34,8 @@ android {
         versionName = "0.1.0"
 
         buildConfigField("int", "ANALYSIS_BATCH_SIZE", intProp("blogwriter.analysisBatchSize", 5))
-        buildConfigField("int", "ANALYSIS_CONCURRENCY", intProp("blogwriter.analysisConcurrency", 3))
+        // 브리지가 동시에 처리하는 모델 호출 수(2)와 맞춘다.
+        buildConfigField("int", "ANALYSIS_CONCURRENCY", intProp("blogwriter.analysisConcurrency", 2))
         buildConfigField("int", "AI_IMAGE_LONG_EDGE_PX", intProp("blogwriter.aiImageLongEdgePx", 1280))
         buildConfigField("int", "AI_IMAGE_JPEG_QUALITY", intProp("blogwriter.aiImageJpegQuality", 80))
 

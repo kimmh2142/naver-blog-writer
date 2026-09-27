@@ -1,6 +1,7 @@
 package com.minhee.blogwriter.ui.common
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,13 +39,15 @@ fun PhotoThumb(
     badge: String,
     modifier: Modifier = Modifier,
     onRemove: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     var failed by remember(uri) { mutableStateOf(false) }
     Box(
         modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)

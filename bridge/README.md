@@ -48,8 +48,28 @@ npm.cmd start                # Ctrl+C로 종료
 | 경로 | 설명 |
 |---|---|
 | `GET /v1/status` | 두 Provider의 로그인, 과금 안전, 사용량 상태. 30초 캐시, `?refresh=1`로 새로 확인. 모델 호출 없음 |
+| `POST /v1/photos/analyze` | 사진 한 배치(최대 10장) 분석. multipart: `meta`(JSON: provider, analysisVersion, photoIds, category, subjectName) + `photo` 파트들(파일 이름 = `photoId.jpg`, JPEG만). 호출 전 상태 확인에 걸리면 모델을 부르지 않음 |
 
-모든 요청에 `Authorization: Bearer <BRIDGE_APP_TOKEN>`이 필요합니다. 로그에는 경로, 상태 코드, 시간만 남깁니다.
+모든 요청에 `Authorization: Bearer <BRIDGE_APP_TOKEN>`이 필요합니다. 로그에는 경로, 상태 코드, 시간만 남기고 사진·분석 내용은 남기지 않습니다.
+모델 호출은 동시에 2개까지만 실행합니다.
+
+### 사진을 남기지 않는 방식
+- Claude: 사진을 메모리에서 base64로만 넘기고, `persistSession: false`로 대화 기록을 저장하지 않습니다.
+- GPT: Codex SDK로 부르면 세션 기록에 사진이 base64로 남아서(PoC에서 확인) `codex exec --ephemeral`을 직접 실행합니다.
+  사진은 요청마다 `.work/codex-<id>/`에 잠깐 두고 호출이 끝나면(성공·실패·시간 초과 모두) 지웁니다.
+  브리지 전용 `CODEX_HOME/sessions`도 호출마다 비웁니다.
+- 브리지를 시작할 때 이전 실행의 `.work/`를 비웁니다.
+
+### 오류 코드 (`{"error":{"code","message"}}`)
+| 코드 | HTTP | 뜻 |
+|---|---|---|
+| `BAD_REQUEST` | 400 | 요청 형식 오류 |
+| `API_KEY_BLOCKED`, `BILLING_RISK` | 403 | 과금 방어로 차단 |
+| `AUTH_REQUIRED`, `ANALYSIS_VERSION_MISMATCH` | 409 | 구독 로그인 필요 / 앱과 브리지의 분석 버전이 다름 |
+| `REFUSED` | 422 | AI가 요청을 거절 |
+| `USAGE_LIMIT` | 429 | 구독 사용량 한도 |
+| `INVALID_OUTPUT`, `ERROR` | 502 | 결과 형식 오류 / 그 밖의 호출 실패 |
+| `TIMEOUT` | 504 | 150초 안에 응답 없음 |
 
 ## 개발
 ```powershell

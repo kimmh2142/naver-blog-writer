@@ -27,13 +27,47 @@ export type ProviderStatus = {
   checkedAt: string;
 };
 
-/**
- * 공통 Provider 경계. 1단계는 상태 조회만 있고,
- * 사진 분석/원고 작성용 generateStructured는 2단계에서 추가한다.
- */
+/** 모델 호출 실패 원인. Android에 error.code로 그대로 전달된다. */
+export type CallErrorCode =
+  | Exclude<StatusCode, "READY">
+  | "TIMEOUT"
+  | "INVALID_OUTPUT"
+  | "REFUSED";
+
+export class ProviderCallError extends Error {
+  constructor(
+    readonly code: CallErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderCallError";
+  }
+}
+
+export type StructuredRequest = {
+  /** 설정의 어떤 모델을 쓸지 (분석/작성) */
+  purpose: "analysis" | "writing";
+  instructions: string;
+  /** JPEG 바이트. 첨부 순서가 곧 사진 순서다. */
+  images: Buffer[];
+  schema: Record<string, unknown>;
+  timeoutMs: number;
+};
+
+export type StructuredResult = {
+  output: unknown;
+  /** 실제로 쓰인 모델 (알 수 없으면 null) */
+  model: string | null;
+  usage: unknown;
+};
+
+/** 공통 Provider 경계. Claude/Codex 구현이 하나씩 있다. */
 export interface AiProvider {
   readonly id: ProviderId;
+  /** 로그인·과금 안전·사용량 확인. 모델 호출 없음. */
   status(): Promise<ProviderStatus>;
+  /** 구조화 JSON을 돌려받는 모델 호출 1회. 과금 방어에 걸리면 ProviderCallError. */
+  generateStructured(request: StructuredRequest): Promise<StructuredResult>;
 }
 
 export function providerStatus(

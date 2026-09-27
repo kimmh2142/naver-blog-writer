@@ -11,7 +11,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.minhee.blogwriter.appContainer
+import com.minhee.blogwriter.data.BlogGenerationRepository
 import com.minhee.blogwriter.data.DraftRepository
+import com.minhee.blogwriter.data.model.AiProviderId
 import com.minhee.blogwriter.data.GenerationConfig
 import com.minhee.blogwriter.data.PhotoOrdering
 import com.minhee.blogwriter.data.model.Category
@@ -41,11 +43,21 @@ sealed interface ResizeTestState {
     data class Done(val summary: String, val lines: List<String>) : ResizeTestState
 }
 
+/** 사진 분석 진행 상태. 완료·실패 장수는 draft의 캐시에서 계산한다. */
+data class AnalysisUiState(
+    val running: Boolean = false,
+    /** 이번 실행에서 보낸 장수 / 처리된 장수 */
+    val total: Int = 0,
+    val processed: Int = 0,
+    val error: String? = null,
+)
+
 data class NewPostUiState(
     val draft: PostDraft? = null,
     val importingPhotos: Boolean = false,
     val message: String? = null,
     val resizeTest: ResizeTestState = ResizeTestState.Idle,
+    val analysis: AnalysisUiState = AnalysisUiState(),
 )
 
 class NewPostViewModel(
@@ -56,6 +68,7 @@ class NewPostViewModel(
     private val aiImagePreparer: AiImagePreparer,
     private val generationConfig: GenerationConfig,
     private val appScope: CoroutineScope,
+    private val generationRepository: BlogGenerationRepository,
 ) : ViewModel() {
 
     // 새 작성 건이면 id를 만들어 SavedStateHandle에 넣어 둔다. 프로세스가 죽었다 살아나도 같은 id로 복원된다.
@@ -145,6 +158,57 @@ class NewPostViewModel(
                 uriPermissions.release(photo.originalUri)
             }
         }
+    }
+
+    fun selectProvider(provider: AiProviderId) {
+        if (_state.value.analysis.running) return
+        edit(immediate = true) { it.copy(selectedProvider = provider.id) }
+        _state.update { it.copy(analysis = AnalysisUiState()) }
+    }
+
+    /**
+     * 선택한 Provider로 아직 분석이 없는(또는 실패한, 버전이 다른) 사진만 분석한다.
+     * 배치가 끝날 때마다 결과를 작성 건에 바로 저장하므로, 중간에 실패해도 성공한 배치는 남는다.
+     */
+    fun analyzePhotos() {
+        val draft = _state.value.draft ?: return
+        if (_state.value.analysis.running) return
+        val provider = draft.provider
+        val total = generationRepository.photosToAnalyze(draft, provider).size
+        if (total == 0) return
+        viewModelScope.launch {
+            _state.update { it.copy(analysis = AnalysisUiState(running = true, total = total)) }
+            val summary = generationRepository.analyzePhotos(draft, provider) { batch ->
+                edit(immediate = true) { current ->
+                    current.copy(
+                        photos = current.photos.map { photo ->
+                            // 분석 중에 빠진 사진의 결과는 버린다.
+                            batch.entries[photo.id]?.let { photo.copy(analyses = photo.analyses + (provider.id to it)) } ?: photo
+                        },
+                    )
+                }
+                _state.update { it.copy(analysis = it.analysis.copy(processed = it.analysis.processed + batch.entries.size)) }
+            }
+            val error = (summary.stopError ?: summary.lastError)?.message
+            _state.update {
+                it.copy(
+                    analysis = AnalysisUiState(total = summary.requested, processed = summary.succeeded + summary.failed, error = error),
+                    message = "${provider.label} 사진 분석: 성공 ${summary.succeeded}장" +
+                        (if (summary.failed > 0) ", 실패 ${summary.failed}장" else "") +
+                        (if (summary.stopError != null) " (중단됨)" else ""),
+                )
+            }
+        }
+    }
+
+    /** 선택한 Provider의 분석 결과만 지우고 전체를 다시 분석한다. 다른 Provider 결과는 그대로 둔다. */
+    fun reanalyzeAll() {
+        if (_state.value.analysis.running) return
+        val provider = _state.value.draft?.provider ?: return
+        edit(immediate = true) { draft ->
+            draft.copy(photos = draft.photos.map { it.copy(analyses = it.analyses - provider.id) })
+        }
+        analyzePhotos()
     }
 
     fun showMessage(message: String) = _state.update { it.copy(message = message) }
@@ -262,6 +326,7 @@ class NewPostViewModel(
                     aiImagePreparer = c.aiImagePreparer,
                     generationConfig = c.generationConfig,
                     appScope = c.appScope,
+                    generationRepository = c.blogGenerationRepository,
                 )
             }
         }

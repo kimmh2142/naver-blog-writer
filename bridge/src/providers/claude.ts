@@ -7,10 +7,47 @@ import {
   claudeEnv,
   claudeUsageWindows,
   evaluateClaudeAccount,
+  evaluateClaudeRateLimitEvent,
   evaluateClaudeUsage,
 } from "../guard.js";
 import type { BridgeDirs } from "../paths.js";
-import { type AiProvider, providerStatus, type ProviderStatus } from "./types.js";
+import {
+  type AiProvider,
+  type CallErrorCode,
+  ProviderCallError,
+  providerStatus,
+  type ProviderStatus,
+  type StructuredRequest,
+  type StructuredResult,
+} from "./types.js";
+
+/** 결과 메시지와 어시스턴트 오류를 앱에 전달할 결과/오류로 바꾼다. */
+export function interpretClaudeResult(
+  result: { subtype: string; stop_reason?: string | null; structured_output?: unknown; errors?: string[] } | null,
+  assistantError: string | null,
+): { output: unknown } | ProviderCallError {
+  const byAssistantError: Record<string, CallErrorCode> = {
+    authentication_failed: "AUTH_REQUIRED",
+    oauth_org_not_allowed: "AUTH_REQUIRED",
+    rate_limit: "USAGE_LIMIT",
+    billing_error: "BILLING_RISK",
+  };
+  if (assistantError && byAssistantError[assistantError]) {
+    return new ProviderCallError(byAssistantError[assistantError], `Claude 호출 실패: ${assistantError}`);
+  }
+  if (!result) return new ProviderCallError("ERROR", `Claude가 결과 없이 끝났습니다${assistantError ? ` (${assistantError})` : ""}.`);
+  if (result.stop_reason === "refusal") return new ProviderCallError("REFUSED", "Claude가 이 요청을 거절했습니다.");
+  if (result.subtype === "success") {
+    if (result.structured_output === undefined || result.structured_output === null) {
+      return new ProviderCallError("INVALID_OUTPUT", "Claude 응답에 구조화 결과가 없습니다.");
+    }
+    return { output: result.structured_output };
+  }
+  if (result.subtype === "error_max_structured_output_retries") {
+    return new ProviderCallError("INVALID_OUTPUT", "Claude가 스키마에 맞는 결과를 만들지 못했습니다.");
+  }
+  return new ProviderCallError("ERROR", `Claude 호출 실패: ${result.subtype} ${(result.errors ?? []).join(" | ").slice(0, 300)}`);
+}
 
 /** Agent SDK의 실험적 사용량 API. 이름이 바뀔 수 있어 있을 때만 쓴다. */
 const USAGE_METHOD = "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET";
@@ -99,5 +136,88 @@ export class ClaudeProvider implements AiProvider {
       abortController.abort();
       await drain;
     }
+  }
+
+  /**
+   * 사진은 메모리에서 base64로만 전달한다(디스크에 쓰지 않음). persistSession:false로 대화 기록도 남기지 않는다.
+   * 실행 중 init의 apiKeySource와 rate_limit_event를 확인해, API 키 인증이나 초과 사용 전환이면 즉시 중단한다.
+   */
+  async generateStructured(request: StructuredRequest): Promise<StructuredResult> {
+    const configCheck = checkClaudeConfigDir(this.dirs.claudeConfigDir);
+    if (configCheck.code !== "READY") throw new ProviderCallError("API_KEY_BLOCKED", configCheck.message);
+
+    mkdirSync(this.dirs.workDir, { recursive: true });
+    const { env } = claudeEnv(this.dirs.claudeConfigDir);
+    const content = [
+      { type: "text" as const, text: request.instructions },
+      ...request.images.map((bytes) => ({
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: "image/jpeg" as const, data: bytes.toString("base64") },
+      })),
+    ];
+    async function* messages(): AsyncGenerator<SDKUserMessage> {
+      yield { type: "user", message: { role: "user", content }, parent_tool_use_id: null };
+    }
+
+    const abortController = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, request.timeoutMs);
+    let stopped: ProviderCallError | null = null;
+    let model: string | null = null;
+    let assistantError: string | null = null;
+    let result: Parameters<typeof interpretClaudeResult>[0] = null;
+    let usage: unknown = null;
+    const stop = (error: ProviderCallError) => {
+      stopped = error;
+      abortController.abort();
+    };
+
+    try {
+      const q = query({
+        prompt: messages(),
+        options: {
+          env,
+          cwd: this.dirs.workDir,
+          settingSources: [],
+          tools: [],
+          permissionMode: "dontAsk",
+          persistSession: false,
+          abortController,
+          maxTurns: 5,
+          model: (request.purpose === "analysis" ? this.models.analysis : this.models.writing) ?? undefined,
+          outputFormat: { type: "json_schema", schema: request.schema },
+        },
+      });
+      for await (const message of q) {
+        if (message.type === "system" && message.subtype === "init") {
+          model = message.model;
+          // 구독 로그인은 status()에서 확인했다. 여기서는 API 키로 바뀌지 않았는지만 다시 본다.
+          if (message.apiKeySource !== "none") {
+            stop(new ProviderCallError("API_KEY_BLOCKED", `API 키(${message.apiKeySource})로 인증하려 해 중단했습니다.`));
+          }
+        } else if (message.type === "rate_limit_event") {
+          const verdict = evaluateClaudeRateLimitEvent(message.rate_limit_info);
+          if (verdict.code !== "READY") stop(new ProviderCallError(verdict.code as CallErrorCode, verdict.message));
+        } else if (message.type === "assistant" && message.error) {
+          assistantError = message.error;
+        } else if (message.type === "result") {
+          result = message;
+          usage = { numTurns: message.num_turns, usage: message.usage, durationApiMs: message.duration_api_ms };
+        }
+        if (stopped) break;
+      }
+    } catch (e) {
+      if (!stopped && !timedOut) throw new ProviderCallError("ERROR", `Claude 호출 실패: ${(e as Error).message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (stopped) throw stopped;
+    if (timedOut) throw new ProviderCallError("TIMEOUT", `Claude 응답이 ${request.timeoutMs / 1000}초 안에 오지 않았습니다.`);
+    const interpreted = interpretClaudeResult(result, assistantError);
+    if (interpreted instanceof ProviderCallError) throw interpreted;
+    return { output: interpreted.output, model, usage };
   }
 }

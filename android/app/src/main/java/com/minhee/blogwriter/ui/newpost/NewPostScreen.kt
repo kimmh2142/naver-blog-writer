@@ -41,7 +41,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -101,6 +103,13 @@ fun NewPostScreen(
         }
 
         val photos = draft.photosInPostOrder()
+        val analyzing = state.analysis.running
+        var detailPhotoId by remember { mutableStateOf<String?>(null) }
+        detailPhotoId?.let { id ->
+            photos.find { it.id == id }?.let { photo ->
+                AnalysisDialog(photo = photo, provider = draft.provider, onDismiss = { detailPhotoId = null })
+            }
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
@@ -116,7 +125,9 @@ fun NewPostScreen(
                     count = photos.size,
                     sortByTakenAt = draft.sortByTakenAt,
                     importing = state.importingPhotos,
-                    canAdd = remaining > 0,
+                    // 분석 중에는 사진 추가·삭제·정렬을 막는다.
+                    canAdd = remaining > 0 && !analyzing,
+                    canSort = !analyzing,
                     onAdd = {
                         try {
                             pickerLauncher.launch(
@@ -136,11 +147,12 @@ fun NewPostScreen(
                             "${photo.postOrder + 1} (선택 ${photo.originalIndex + 1})"
                         } else {
                             "${photo.postOrder + 1}"
-                        }
+                        } + analysisMark(photo, draft.provider)
                         PhotoThumb(
                             uri = photo.originalUri,
                             badge = badge,
-                            onRemove = { viewModel.removePhoto(photo.id) },
+                            onRemove = if (analyzing) null else ({ viewModel.removePhoto(photo.id) }),
+                            onClick = { detailPhotoId = photo.id },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -187,12 +199,22 @@ fun NewPostScreen(
             }
 
             item {
+                AnalysisSection(
+                    draft = draft,
+                    state = state.analysis,
+                    onSelectProvider = viewModel::selectProvider,
+                    onAnalyze = viewModel::analyzePhotos,
+                    onReanalyzeAll = viewModel::reanalyzeAll,
+                )
+            }
+
+            item {
                 Column {
                     Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
                         Text("원고 생성")
                     }
                     Text(
-                        "AI 원고 생성은 다음 단계(Phase 2)에서 연결돼요. 지금 입력한 내용은 자동 저장돼요.",
+                        "원고 생성은 다음 단계에서 연결돼요. 지금 입력한 내용과 사진 분석 결과는 자동 저장돼요.",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 4.dp),
                     )
@@ -237,6 +259,7 @@ private fun PhotoHeader(
     sortByTakenAt: Boolean,
     importing: Boolean,
     canAdd: Boolean,
+    canSort: Boolean,
     onAdd: () -> Unit,
     onSortChange: (Boolean) -> Unit,
 ) {
@@ -257,7 +280,7 @@ private fun PhotoHeader(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            Switch(checked = sortByTakenAt, onCheckedChange = onSortChange, enabled = count > 1)
+            Switch(checked = sortByTakenAt, onCheckedChange = onSortChange, enabled = count > 1 && canSort)
         }
     }
 }

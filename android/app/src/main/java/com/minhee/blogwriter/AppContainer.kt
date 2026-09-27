@@ -2,6 +2,7 @@ package com.minhee.blogwriter
 
 import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
+import com.minhee.blogwriter.data.BlogGenerationRepository
 import com.minhee.blogwriter.data.DraftRepository
 import com.minhee.blogwriter.data.GenerationConfig
 import com.minhee.blogwriter.data.StyleRepository
@@ -37,4 +38,10 @@ class AppContainer(context: Context) {
     )
 
     val bridgeApi = BridgeApi(baseUrl = BuildConfig.BRIDGE_URL, token = BuildConfig.BRIDGE_TOKEN)
+
+    val blogGenerationRepository = BlogGenerationRepository(
+        config = generationConfig,
+        prepareImage = { photo -> aiImagePreparer.prepare(photo).file },
+        analyze = bridgeApi::analyzePhotos,
+    )
 }

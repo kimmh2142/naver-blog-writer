@@ -1,7 +1,7 @@
 {
   "name": "naver-blog-writer-bridge",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Android 앱과 사용자의 Claude/ChatGPT 구독 로그인을 잇는 Windows 로컬 브리지. API 키를 쓰지 않는다.",
   "type": "module",
   "scripts": {

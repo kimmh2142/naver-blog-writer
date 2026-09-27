@@ -33,17 +33,6 @@ export function buildSafeEnv(
   return { env: { ...env, ...overrides }, removed: removed.sort() };
 }
 
-/** 모델 호출을 막아야 하는 상황. code는 Android에 그대로 전달된다. */
-export class GuardError extends Error {
-  constructor(
-    readonly code: Exclude<StatusCode, "READY">,
-    message: string,
-  ) {
-    super(message);
-    this.name = "GuardError";
-  }
-}
-
 export type GuardVerdict = { code: StatusCode; message: string };
 const ok: GuardVerdict = { code: "READY", message: "사용 가능" };
 
