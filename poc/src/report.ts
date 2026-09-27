@@ -2,7 +2,8 @@ import { parseDraft, type Draft } from "./checks.js";
 import type { PreparedPhoto } from "./inputs.js";
 import type { RunRecord } from "./providers/types.js";
 
-const yesNo = (v: boolean | undefined | null) => (v ? "O" : "X");
+// 콘솔 글꼴에서 영문 O와 숫자 0이 헷갈리지 않도록 글자로 표시한다.
+export const passFail = (v: boolean | undefined | null) => (v ? "통과" : "실패");
 
 /** 사람이 읽고 평가하기 쉬운 원고 미리보기 (네이버에 붙일 때의 순서대로). */
 export function renderPreview(record: RunRecord, photos: PreparedPhoto[]): string {
@@ -63,8 +64,8 @@ export function renderSummary(records: RunRecord[], meta: { photoCount: number; 
   for (const r of records) {
     const c = r.checks;
     lines.push(
-      `| ${r.provider} | ${r.runIndex} | ${yesNo(r.success)} | ${yesNo(c?.schemaValid)} | ${c ? (c.titlesCount === 3 ? "O" : `X(${c.titlesCount})`) : "-"} | ` +
-        `${yesNo(c?.allPhotosRecognized)} | ${c ? (c.orderPreserved ? "O" : `X: ${c.orderProblem}`) : "-"} | ` +
+      `| ${r.provider} | ${r.runIndex} | ${passFail(r.success)} | ${passFail(c?.schemaValid)} | ${c ? (c.titlesCount === 3 ? "통과" : `실패(${c.titlesCount})`) : "-"} | ` +
+        `${passFail(c?.allPhotosRecognized)} | ${c ? (c.orderPreserved ? "통과" : `실패: ${c.orderProblem}`) : "-"} | ` +
         `${(r.durationMs / 1000).toFixed(1)} | ${r.retries.sdkApiRetries ?? "?"} | ${r.authAborted ? "중단" : "구독"} | ${r.model ?? "-"} | ${(r.error ?? "").replace(/\|/g, "/").slice(0, 80)} |`,
     );
   }

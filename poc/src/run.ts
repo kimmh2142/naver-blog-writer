@@ -8,7 +8,7 @@ import { paths } from "./paths.js";
 import { runClaude } from "./providers/claude.js";
 import { runCodex } from "./providers/codex.js";
 import type { ProviderName, RunRecord } from "./providers/types.js";
-import { renderEvaluationSheet, renderPreview, renderSummary } from "./report.js";
+import { passFail, renderEvaluationSheet, renderPreview, renderSummary } from "./report.js";
 
 const { values } = parseArgs({
   options: {
@@ -66,8 +66,8 @@ outer: for (let i = 1; i <= runs; i++) {
     writeFileSync(path.join(outDir, `${provider}-run${i}.md`), renderPreview(record, inputs.photos));
     const c = record.checks;
     console.log(
-      `  성공 ${record.success ? "O" : "X"} · 스키마 ${c?.schemaValid ? "O" : "X"} · 사진 인식 ${c?.allPhotosRecognized ? "O" : "X"} · ` +
-        `순서 ${c?.orderPreserved ? "O" : "X"} · ${(record.durationMs / 1000).toFixed(1)}초${record.error ? ` · 오류: ${record.error}` : ""}`,
+      `  성공 ${passFail(record.success)} · 스키마 ${passFail(c?.schemaValid)} · 사진 인식 ${passFail(c?.allPhotosRecognized)} · ` +
+        `순서 ${passFail(c?.orderPreserved)} · ${(record.durationMs / 1000).toFixed(1)}초${record.error ? ` · 오류: ${record.error}` : ""}`,
     );
 
     if (record.authAborted) {
