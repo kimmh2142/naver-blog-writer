@@ -52,6 +52,32 @@ test("지시문: 출처 구분, 사실 규칙, 사진 번호, 문체, 카테고�
   assert.match(buildRepairPrompt(input, { x: 1 }, ["빠진 사진 번호: 4"]), /빠진 사진 번호: 4/);
 });
 
+test("기본 문체: 자연스러운 '~다'체, 사용자 문체가 우선, 사실 규칙이 가장 우선", () => {
+  const noStyle = buildWritingPrompt({ ...input, style: {} });
+  assert.match(noStyle, /- \(사용자 설정 없음\)/);
+  assert.match(noStyle, /자연스러운 개인 블로그의 '~다'체/);
+  assert.match(noStyle, /방문했다, 공간이 넓다, 전시되어 있다, 볼 수 있다/);
+  assert.match(noStyle, /종결어미가 따로 없으면 존댓말\(~했어요, ~있어요, ~보여요\)을 쓰지 않는다/);
+  assert.match(noStyle, /뉴스 기사처럼 딱딱하게 쓰지 않는다/);
+  assert.match(noStyle, /사실 규칙 > 사용자 문체 설정 > 기본 문체/);
+  // 사용자 문체 설정은 그대로 전달되고 기본 문체보다 우선한다고 적혀 있다
+  const withStyle = buildWritingPrompt(input);
+  assert.match(withStyle, /- 종결어미: ~했어요/);
+  assert.match(withStyle, /아래 기본 문체보다 우선한다/);
+});
+
+test("사진 묘사: '사진에는 ~가 보인다'를 반복하지 않고 본문에 녹이되, 경험으로 바꾸지 않는다", () => {
+  const prompt = buildWritingPrompt(input);
+  assert.match(prompt, /사진을 가리키는 문장을 반복하지 않는다/);
+  assert.match(prompt, /'철길 주변으로 나무가 이어져 있다'/);
+  assert.match(prompt, /관찰을 사용자의 경험으로 바꾸지 않는다/);
+  assert.match(prompt, /'철길을 걸어보니 분위기가 너무 좋았다'/);
+  // 이전 지시문의 존댓말 관찰 예시는 없어야 한다
+  assert.doesNotMatch(prompt, /사진 속 ~가 보여요/);
+  assert.doesNotMatch(prompt, /적혀 있어요/);
+  assert.match(prompt, /간판에는 ~라고 적혀 있다/);
+});
+
 test("구조 검사: 정상이면 문제 없음", () => {
   assert.deepEqual(findStructureProblems(draft([["1", "2"], ["3"], ["4"]]), 4), []);
 });
