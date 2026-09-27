@@ -5,6 +5,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.minhee.blogwriter.data.DraftRepository
 import com.minhee.blogwriter.data.GenerationConfig
 import com.minhee.blogwriter.data.StyleRepository
+import com.minhee.blogwriter.data.remote.BridgeApi
 import com.minhee.blogwriter.photo.AiImagePreparer
 import com.minhee.blogwriter.photo.PhotoMetadataReader
 import com.minhee.blogwriter.photo.UriPermissions
@@ -34,4 +35,6 @@ class AppContainer(context: Context) {
         workDir = File(appContext.cacheDir, "ai-images"),
         config = generationConfig,
     )
+
+    val bridgeApi = BridgeApi(baseUrl = BuildConfig.BRIDGE_URL, token = BuildConfig.BRIDGE_TOKEN)
 }

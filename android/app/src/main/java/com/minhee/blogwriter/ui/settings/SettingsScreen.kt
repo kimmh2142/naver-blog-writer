@@ -99,6 +99,15 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
+                BridgeSection(
+                    url = viewModel.bridgeUrl,
+                    configured = viewModel.bridgeConfigured,
+                    state = state.bridge,
+                    onCheck = viewModel::checkBridge,
+                )
+            }
+            item { HorizontalDivider() }
+            item {
                 Text("나의 블로그 문체", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "원고를 만들 때마다 이 설정을 그대로 참고해요. 글마다 다시 분석하지 않아요.",

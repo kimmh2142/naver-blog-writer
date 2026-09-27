@@ -3,6 +3,9 @@
 
     <!-- 사진은 Photo Picker로만 받으므로 저장소 권한을 요청하지 않는다. -->
 
+    <!-- PC 브리지(Tailscale HTTPS) 연결 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".BlogWriterApplication"
         android:allowBackup="false"

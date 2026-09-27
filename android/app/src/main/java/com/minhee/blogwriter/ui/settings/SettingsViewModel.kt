@@ -4,10 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.minhee.blogwriter.BuildConfig
 import com.minhee.blogwriter.appContainer
 import com.minhee.blogwriter.data.GenerationConfig
 import com.minhee.blogwriter.data.StyleRepository
+import com.minhee.blogwriter.data.model.BridgeStatus
 import com.minhee.blogwriter.data.model.StyleProfile
+import com.minhee.blogwriter.data.remote.BridgeApi
+import com.minhee.blogwriter.data.remote.BridgeError
+import com.minhee.blogwriter.data.remote.BridgeResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,12 +25,37 @@ data class SettingsUiState(
     val dirty: Boolean = false,
     val saving: Boolean = false,
     val message: String? = null,
+    val bridge: BridgeUiState = BridgeUiState(),
+)
+
+/** PC 브리지 연결 확인 결과. */
+data class BridgeUiState(
+    val checking: Boolean = false,
+    val status: BridgeStatus? = null,
+    val error: BridgeError? = null,
 )
 
 class SettingsViewModel(
     private val styleRepository: StyleRepository,
     val generationConfig: GenerationConfig,
+    private val bridgeApi: BridgeApi,
 ) : ViewModel() {
+
+    val bridgeUrl: String = BuildConfig.BRIDGE_URL
+    val bridgeConfigured: Boolean = bridgeApi.isConfigured
+
+    /** 브리지에 두 Provider 상태를 물어본다. 모델 호출은 없다. */
+    fun checkBridge() {
+        if (_state.value.bridge.checking) return
+        viewModelScope.launch {
+            _state.update { it.copy(bridge = it.bridge.copy(checking = true, error = null)) }
+            val bridge = when (val result = bridgeApi.status(refresh = true)) {
+                is BridgeResult.Ok -> BridgeUiState(status = result.value)
+                is BridgeResult.Err -> BridgeUiState(error = result.error)
+            }
+            _state.update { it.copy(bridge = bridge) }
+        }
+    }
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -64,7 +94,7 @@ class SettingsViewModel(
     companion object {
         val Factory = viewModelFactory {
             initializer {
-                SettingsViewModel(appContainer.styleRepository, appContainer.generationConfig)
+                SettingsViewModel(appContainer.styleRepository, appContainer.generationConfig, appContainer.bridgeApi)
             }
         }
     }

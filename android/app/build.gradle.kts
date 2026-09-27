@@ -16,6 +16,12 @@ val localProps = Properties().apply {
 fun intProp(key: String, default: Int): String =
     (localProps.getProperty(key)?.trim()?.toIntOrNull() ?: default).toString()
 
+// 비밀값/주소는 git에 올라가지 않는 local.properties에서만 읽는다. 없으면 빈 문자열(앱에서 "설정 안 됨" 표시).
+fun stringProp(key: String): String {
+    val value = localProps.getProperty(key)?.trim().orEmpty()
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+
 android {
     namespace = "com.minhee.blogwriter"
     compileSdk = 34
@@ -31,6 +37,10 @@ android {
         buildConfigField("int", "ANALYSIS_CONCURRENCY", intProp("blogwriter.analysisConcurrency", 3))
         buildConfigField("int", "AI_IMAGE_LONG_EDGE_PX", intProp("blogwriter.aiImageLongEdgePx", 1280))
         buildConfigField("int", "AI_IMAGE_JPEG_QUALITY", intProp("blogwriter.aiImageJpegQuality", 80))
+
+        // PC 브리지 (bridge/에서 `npm run setup-token`이 local.properties에 채운다)
+        buildConfigField("String", "BRIDGE_URL", stringProp("blogwriter.bridgeUrl"))
+        buildConfigField("String", "BRIDGE_TOKEN", stringProp("blogwriter.bridgeToken"))
     }
 
     buildTypes {
@@ -75,7 +85,9 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.2")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }

@@ -29,6 +29,10 @@ poc/out/
 poc/.auth/
 poc/.work/
 
+# 브리지: 구독 로그인 정보와 요청별 임시 파일 (.env는 위 규칙으로 제외)
+bridge/.auth/
+bridge/.work/
+
 # Node (Phase 2 backend)
 node_modules/
 dist/

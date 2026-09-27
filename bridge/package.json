@@ -1,0 +1,30 @@
+{
+  "name": "naver-blog-writer-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Android 앱과 사용자의 Claude/ChatGPT 구독 로그인을 잇는 Windows 로컬 브리지. API 키를 쓰지 않는다.",
+  "type": "module",
+  "scripts": {
+    "setup-token": "tsx src/scripts/setup-token.ts",
+    "login:claude": "tsx src/scripts/login.ts claude",
+    "login:codex": "tsx src/scripts/login.ts codex",
+    "status": "tsx src/scripts/status.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.283",
+    "@hono/node-server": "2.1.1",
+    "@openai/codex-sdk": "0.157.1",
+    "hono": "4.13.9"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
